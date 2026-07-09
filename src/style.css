@@ -1,0 +1,217 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;600;700&display=swap');
+
+:root {
+  --teal-deep: #0a2a2e;
+  --teal-shadow: #0d3d42;
+  --orange-sun: #ff8c3a;
+  --orange-glow: #ffb347;
+  --neon-green: #39ff9a;
+  --neon-dim: #1a8f5a;
+  --fog: rgba(20, 40, 45, 0.85);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #061418;
+  font-family: 'Rajdhani', sans-serif;
+  color: var(--neon-green);
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+}
+
+/* ---- HUD ---- */
+.hud {
+  position: fixed;
+  top: 1.25rem;
+  left: 1.25rem;
+  z-index: 10;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.85rem 1.1rem;
+  background: linear-gradient(135deg, rgba(8, 30, 34, 0.72), rgba(12, 45, 50, 0.45));
+  border: 1px solid rgba(57, 255, 154, 0.35);
+  box-shadow:
+    0 0 18px rgba(57, 255, 154, 0.15),
+    inset 0 0 24px rgba(57, 255, 154, 0.05);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+  min-width: 9.5rem;
+}
+
+.hud-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1.25rem;
+}
+
+.hud-label {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.65rem;
+  letter-spacing: 0.18em;
+  color: var(--neon-dim);
+  text-shadow: 0 0 8px rgba(57, 255, 154, 0.4);
+}
+
+.hud-value {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--neon-green);
+  text-shadow:
+    0 0 6px rgba(57, 255, 154, 0.8),
+    0 0 16px rgba(57, 255, 154, 0.35);
+}
+
+/* ---- Overlays ---- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse at 70% 30%, rgba(255, 140, 58, 0.18), transparent 50%),
+    radial-gradient(ellipse at 20% 80%, rgba(13, 61, 66, 0.55), transparent 45%),
+    rgba(4, 14, 18, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.overlay-panel {
+  text-align: center;
+  padding: 2.5rem 2.75rem;
+  max-width: 28rem;
+  border: 1px solid rgba(57, 255, 154, 0.4);
+  background: linear-gradient(160deg, rgba(8, 28, 32, 0.92), rgba(18, 50, 55, 0.85));
+  box-shadow:
+    0 0 40px rgba(255, 140, 58, 0.12),
+    0 0 60px rgba(57, 255, 154, 0.08);
+}
+
+.title {
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 900;
+  font-size: clamp(1.8rem, 5vw, 2.75rem);
+  letter-spacing: 0.12em;
+  color: var(--orange-glow);
+  text-shadow:
+    0 0 12px rgba(255, 140, 58, 0.7),
+    0 0 40px rgba(255, 100, 40, 0.35);
+  margin-bottom: 0.35rem;
+}
+
+.subtitle {
+  font-size: 1.05rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--neon-green);
+  opacity: 0.85;
+  margin-bottom: 1.5rem;
+}
+
+.controls {
+  list-style: none;
+  text-align: left;
+  margin: 0 auto 1.75rem;
+  display: grid;
+  gap: 0.55rem;
+  font-size: 1rem;
+  color: rgba(180, 255, 220, 0.9);
+}
+
+.controls kbd {
+  display: inline-block;
+  min-width: 1.4rem;
+  padding: 0.1rem 0.35rem;
+  margin-right: 0.15rem;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.7rem;
+  color: var(--teal-deep);
+  background: var(--neon-green);
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(57, 255, 154, 0.5);
+}
+
+.neon-btn {
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.15em;
+  padding: 0.85rem 1.75rem;
+  cursor: pointer;
+  color: var(--teal-deep);
+  background: linear-gradient(180deg, var(--neon-green), #2ad87a);
+  border: none;
+  box-shadow:
+    0 0 16px rgba(57, 255, 154, 0.55),
+    0 4px 0 #1a8f5a;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.neon-btn:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 28px rgba(57, 255, 154, 0.75),
+    0 6px 0 #1a8f5a;
+}
+
+.neon-btn:active {
+  transform: translateY(2px);
+  box-shadow:
+    0 0 12px rgba(57, 255, 154, 0.4),
+    0 1px 0 #1a8f5a;
+}
+
+.hint {
+  margin-top: 0.9rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  opacity: 0.55;
+}
+
+.final-time {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--neon-green);
+  text-shadow: 0 0 20px rgba(57, 255, 154, 0.7);
+  margin-bottom: 1.5rem;
+}
+
+.hidden {
+  display: none !important;
+}
+
+@media (max-width: 600px) {
+  .hud {
+    top: 0.6rem;
+    left: 0.6rem;
+    padding: 0.55rem 0.75rem;
+    min-width: 7.5rem;
+  }
+
+  .hud-value {
+    font-size: 0.9rem;
+  }
+
+  .overlay-panel {
+    margin: 1rem;
+    padding: 1.5rem 1.25rem;
+  }
+}
