@@ -97,8 +97,6 @@ export class MobileControls {
     return (
       this.coarsePointerQuery.matches
       || this.mobileViewportQuery.matches
-      || navigator.maxTouchPoints > 0
-      || 'ontouchstart' in window
     );
   }
 
