@@ -36,11 +36,12 @@
           <ul class="controls">
             <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows — steer &amp; move</li>
             <li><kbd>Space</kbd> ascend · <kbd>Shift</kbd> descend</li>
+            <li>On mobile: left thumb steer pad + right thumb altitude buttons</li>
             <li>Fly through neon rings in order</li>
             <li><kbd>R</kbd> restart anytime</li>
           </ul>
           <button id="start-btn" class="neon-btn">START FLIGHT</button>
-          <p class="hint">or press Enter</p>
+          <p class="hint">or press Enter / tap start</p>
         </div>
       </div>
 
@@ -51,6 +52,31 @@
           <p id="final-time" class="final-time">0:00.0</p>
           <button id="restart-btn" class="neon-btn">FLY AGAIN</button>
           <p class="hint">or press R</p>
+        </div>
+      </div>
+
+      <div id="mobile-controls" class="mobile-controls hidden" aria-hidden="true">
+        <button id="mobile-restart" class="mobile-restart" type="button" aria-label="Restart flight">
+          RST
+        </button>
+
+        <div class="mobile-steer-zone" aria-label="Steer and move">
+          <div id="mobile-stick" class="mobile-stick" role="application" aria-label="Move joystick">
+            <span class="mobile-stick-label mobile-stick-label-top">FWD</span>
+            <span class="mobile-stick-label mobile-stick-label-bottom">BACK</span>
+            <span class="mobile-stick-label mobile-stick-label-left">LEFT</span>
+            <span class="mobile-stick-label mobile-stick-label-right">RIGHT</span>
+            <div id="mobile-stick-knob" class="mobile-stick-knob"></div>
+          </div>
+        </div>
+
+        <div class="mobile-altitude-zone" aria-label="Altitude controls">
+          <button class="mobile-altitude-button" type="button" data-mobile-input="up" aria-label="Ascend">
+            ASC
+          </button>
+          <button class="mobile-altitude-button mobile-altitude-button-descend" type="button" data-mobile-input="down" aria-label="Descend">
+            DESC
+          </button>
         </div>
       </div>
     </div>
