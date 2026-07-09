@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { createSceneSetup } from './scene/setup';
 import { loadMapWorld, buildFigureEightRingLayout, type WorldObjects } from './world/mapLoader';
 import { updateWater } from './world/generate';
-import { createHelicopter } from './models/helicopter';
+import { loadHelicopter } from './models/helicopter';
 import { HelicopterController } from './helicopter/controller';
 import { CheckpointSystem } from './rings/checkpoints';
 import { HUD } from './hud/hud';
+import { MobileControls } from './hud/mobileControls';
 import { createPostProcessing, ExhaustParticles } from './effects/postprocessing';
 
 type GamePhase = 'loading' | 'start' | 'playing' | 'complete';
@@ -26,6 +27,7 @@ let checkpoints: CheckpointSystem;
 let hud: HUD;
 let heli: THREE.Group;
 let exhaust: ExhaustParticles;
+let mobileControls: MobileControls;
 const { composer } = createPostProcessing(renderer, scene, camera);
 
 let phase: GamePhase = 'loading';
@@ -48,12 +50,14 @@ function startGame() {
   completeOverlay.classList.add('hidden');
   hud.show();
   hud.update(0, 0, controller.getAltitude(), 0);
+  mobileControls.show();
   clock.start();
 }
 
 function completeGame() {
   phase = 'complete';
   controller.enabled = false;
+  mobileControls.hide();
   finalTimeEl.textContent = hud.formatTime(elapsed);
   completeOverlay.classList.remove('hidden');
 }
@@ -138,7 +142,8 @@ async function boot() {
       setLoadingText(`Loading Fruzer Polygon map… ${pct}%`);
     });
 
-    heli = createHelicopter();
+    setLoadingText('Loading helicopter…');
+    heli = await loadHelicopter();
     scene.add(heli);
 
     controller = new HelicopterController(heli, camera, world.getGroundHeight);
@@ -153,6 +158,13 @@ async function boot() {
     checkpoints = new CheckpointSystem(scene, ringLayout);
     hud = new HUD(checkpoints.total);
     exhaust = new ExhaustParticles(scene);
+    mobileControls = new MobileControls({
+      setInput: (input) => controller.setTouchInput(input),
+      clearInput: () => controller.clearTouchInput(),
+      onRestart: () => {
+        if (phase === 'playing') restartGame();
+      },
+    });
 
     ready = true;
     phase = 'start';

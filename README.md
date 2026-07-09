@@ -49,4 +49,9 @@ Asset path: `public/maps/fruzer-polygon.glb`
 - **Space** — ascend
 - **Shift** — descend
 - **R** — restart
+- **Mobile / touch** — left thumb steer pad, right thumb ascend/descend buttons, small restart button during flight
 - Fly through neon rings in order (10 total)
+
+## Credits
+
+Helicopter model: **Attack Chopper** by Cheese Animal Productions (CC-BY) via [OpenGameArt](https://opengameart.org/content/attack-chopper). See `public/models/ATTRIBUTION.md`.
