@@ -2,11 +2,11 @@
 
 ## Live site (public, no password)
 
-**https://spectacular-queijadas-3c2b43.netlify.app**
+**https://melodious-hamster-4cfdfd.netlify.app**
 
 Fruzer Polygon map build. Deployed with `--allow-anonymous --created-via cli` (no drop password).
 
-- Site ID: `a54b7c76-7ce6-447a-8f6e-b41c67663881`
+- Site ID: `c1e39821-32dd-4f15-8ea6-79889f137cab`
 
 ### Claim into your Netlify account (recommended)
 
@@ -15,9 +15,9 @@ Anonymous sites can be suspended if left unclaimed. Claim within ~1 hour:
 1. Log in: `netlify login`
 2. Run:
    ```bash
-   netlify claim --site a54b7c76-7ce6-447a-8f6e-b41c67663881 --token eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzQ1MDIsImV4cCI6MTc4MzU3ODEwMiwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiIxNjA5Y2U1Ni0wN2QwLTQ4ZDMtOWU1Mi1lNjkxOGU0ZDk5NGIifQ.TQn3m8uBEY4t3nEdXai2STYUEM8_MOSfY5-KZLT3Ue4
+   netlify claim --site c1e39821-32dd-4f15-8ea6-79889f137cab --token eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzQ5NTMsImV4cCI6MTc4MzU3ODU1MywiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJkNmJmNDQxNy0xMDdkLTQzZmItYjk3Mi1kMzQ1MjI0OWYxNGQifQ.3-qJlSGJVYlaTSR9VMxX8Qip2BZqKW3TxBDWU5IIlwE
    ```
-3. Or open: https://app.netlify.com/drop/spectacular-queijadas-3c2b43#drop_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzQ1MDIsImV4cCI6MTc4MzU3ODEwMiwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiIxNjA5Y2U1Ni0wN2QwLTQ4ZDMtOWU1Mi1lNjkxOGU0ZDk5NGIifQ.TQn3m8uBEY4t3nEdXai2STYUEM8_MOSfY5-KZLT3Ue4
+3. Or open: https://app.netlify.com/drop/melodious-hamster-4cfdfd#drop_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzQ5NTMsImV4cCI6MTc4MzU3ODU1MywiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJkNmJmNDQxNy0xMDdkLTQzZmItYjk3Mi1kMzQ1MjI0OWYxNGQifQ.3-qJlSGJVYlaTSR9VMxX8Qip2BZqKW3TxBDWU5IIlwE
 
 ### Redeploy (public, no password)
 
