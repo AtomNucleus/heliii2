@@ -12,8 +12,8 @@ export const HEIGHT_GRID_RES = 96;
 /** Ray origin height above map max Y */
 export const HEIGHT_RAY_LIFT = 80;
 
-export const MAP_URL = '/maps/fruzer-polygon.glb';
-export const DRACO_DECODER_PATH = '/draco/';
+export const MAP_URL = './maps/fruzer-polygon.glb';
+export const DRACO_DECODER_PATH = './draco/';
 
 export interface WorldObjects {
   group: THREE.Group;
@@ -260,7 +260,8 @@ export async function loadMapWorld(
   const mapRoot = gltf.scene;
   mapRoot.name = 'fruzerPolygon';
 
-  // Measure raw bounds, then center XZ and sit min-Y on 0 before scaling
+  // Measure raw bounds, then center in local space and scale via a wrapper
+  // so translation is not left unscaled (Three applies T*R*S).
   mapRoot.updateMatrixWorld(true);
   const rawBox = new THREE.Box3().setFromObject(mapRoot);
   const rawSize = new THREE.Vector3();
@@ -272,11 +273,15 @@ export async function loadMapWorld(
   const scale = MAP_TARGET_SIZE / horiz;
 
   mapRoot.position.set(-rawCenter.x, -rawBox.min.y, -rawCenter.z);
-  mapRoot.scale.setScalar(scale);
-  mapRoot.updateMatrixWorld(true);
+
+  const mapScaled = new THREE.Group();
+  mapScaled.name = 'fruzerPolygonScaled';
+  mapScaled.scale.setScalar(scale);
+  mapScaled.add(mapRoot);
+  mapScaled.updateMatrixWorld(true);
 
   const colliders: THREE.Mesh[] = [];
-  mapRoot.traverse((obj) => {
+  mapScaled.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
     mesh.castShadow = true;
@@ -286,18 +291,22 @@ export async function loadMapWorld(
       for (const m of mats) {
         const std = m as THREE.MeshStandardMaterial;
         if (std.map) std.map.colorSpace = THREE.SRGBColorSpace;
+        if ('emissiveMap' in std && std.emissiveMap) {
+          std.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+        }
         std.needsUpdate = true;
       }
     }
     colliders.push(mesh);
   });
 
-  group.add(mapRoot);
+  group.add(mapScaled);
 
-  const bounds = new THREE.Box3().setFromObject(mapRoot);
+  const bounds = new THREE.Box3().setFromObject(mapScaled);
   const size = new THREE.Vector3();
   bounds.getSize(size);
   const mapHalfExtent = Math.max(size.x, size.z) * 0.5;
+  // Map ready: scaled into play area with raycast height sampling
 
   const getGroundHeight = buildHeightSampler(colliders, bounds, FALLBACK_GROUND_Y);
 
@@ -305,7 +314,7 @@ export async function loadMapWorld(
   const spawnX = 0;
   const spawnZ = 0;
   const groundY = getGroundHeight(spawnX, spawnZ);
-  const spawnPosition = new THREE.Vector3(spawnX, groundY + 3.2, spawnZ);
+  const spawnPosition = new THREE.Vector3(spawnX, groundY + 8, spawnZ);
 
   const landingPad = createLandingPad();
   landingPad.position.set(spawnX, groundY + 0.12, spawnZ);
