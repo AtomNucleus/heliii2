@@ -44,6 +44,7 @@ export class MobileControls {
 
   show() {
     this.playing = true;
+    // Force a fresh visibility pass after play starts (viewport may have changed)
     this.updateVisibility();
   }
 
@@ -54,9 +55,16 @@ export class MobileControls {
   }
 
   private bindEvents() {
-    this.mobileViewportQuery.addEventListener('change', () => this.updateVisibility());
-    this.coarsePointerQuery.addEventListener('change', () => this.updateVisibility());
-    window.addEventListener('resize', () => this.updateVisibility());
+    const onViewportChange = () => this.updateVisibility();
+    this.mobileViewportQuery.addEventListener('change', onViewportChange);
+    this.coarsePointerQuery.addEventListener('change', onViewportChange);
+    // Older Safari
+    if ('addListener' in this.mobileViewportQuery) {
+      (this.mobileViewportQuery as MediaQueryList).addListener(onViewportChange);
+      (this.coarsePointerQuery as MediaQueryList).addListener(onViewportChange);
+    }
+    window.addEventListener('resize', onViewportChange);
+    window.addEventListener('orientationchange', onViewportChange);
 
     this.root.addEventListener('touchstart', this.preventTouchDefault, { passive: false });
     this.root.addEventListener('touchmove', this.preventTouchDefault, { passive: false });
@@ -94,9 +102,14 @@ export class MobileControls {
   }
 
   private supportsTouchControls(): boolean {
+    const hasTouchPoints =
+      typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
+    const narrowViewport = window.innerWidth <= 900;
     return (
       this.coarsePointerQuery.matches
       || this.mobileViewportQuery.matches
+      || hasTouchPoints
+      || narrowViewport
     );
   }
 

@@ -29,8 +29,8 @@ export const COLORS = {
 export function createSceneSetup(canvas: HTMLCanvasElement) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(COLORS.skyTop);
-  // Lighter fog so the Fruzer Polygon map reads at distance
-  scene.fog = new THREE.FogExp2(COLORS.fog, 0.0028);
+  // Light fog so textured Fruzer Polygon materials stay readable at distance
+  scene.fog = new THREE.FogExp2(COLORS.fog, 0.002);
 
   const camera = new THREE.PerspectiveCamera(
     60,
@@ -48,13 +48,14 @@ export function createSceneSetup(canvas: HTMLCanvasElement) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  // Higher exposure so textured BR materials aren't crushed by ACES
+  renderer.toneMappingExposure = 1.3;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-  // Warm key light from the sun direction
-  const sunLight = new THREE.DirectionalLight(COLORS.orangeGlow, 2.2);
+  // Warm key light — keep sunset feel without black unlit faces
+  const sunLight = new THREE.DirectionalLight(COLORS.orangeGlow, 1.85);
   sunLight.position.set(80, 45, -60);
   sunLight.castShadow = true;
   sunLight.shadow.mapSize.set(2048, 2048);
@@ -67,15 +68,15 @@ export function createSceneSetup(canvas: HTMLCanvasElement) {
   sunLight.shadow.bias = -0.0005;
   scene.add(sunLight);
 
-  // Cool fill for teal shadows
-  const fillLight = new THREE.DirectionalLight(COLORS.tealMid, 0.55);
+  // Stronger cool fill so shadowed faces stay readable
+  const fillLight = new THREE.DirectionalLight(COLORS.tealMid, 0.85);
   fillLight.position.set(-40, 20, 30);
   scene.add(fillLight);
 
-  const ambient = new THREE.AmbientLight(0x4a6070, 0.35);
+  const ambient = new THREE.AmbientLight(0x5a7080, 0.72);
   scene.add(ambient);
 
-  const hemi = new THREE.HemisphereLight(COLORS.orangeGlow, COLORS.tealDeep, 0.45);
+  const hemi = new THREE.HemisphereLight(COLORS.orangeGlow, COLORS.tealDeep, 0.7);
   scene.add(hemi);
 
   const onResize = () => {

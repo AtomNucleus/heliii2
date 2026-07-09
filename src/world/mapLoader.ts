@@ -4,7 +4,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { COLORS } from '../scene/setup';
 
 /** Target play-area width (largest XZ extent after scale), in world units */
-export const MAP_TARGET_SIZE = 280;
+export const MAP_TARGET_SIZE = 320;
 /** Fallback ground Y when a raycast misses */
 export const FALLBACK_GROUND_Y = 0;
 /** Height-sample grid resolution (cells per side) */
@@ -226,6 +226,82 @@ function buildHeightSampler(
   };
 }
 
+const SPAWN_GRID = 11;
+/** Central fraction of mapHalfExtent used for spawn search */
+const SPAWN_SEARCH_FRACTION = 0.4;
+/** Reject deep pits / water-like samples when better options exist */
+const SPAWN_MIN_FLOOR_Y = 0.5;
+
+export interface OpenSpawn {
+  x: number;
+  z: number;
+  groundY: number;
+}
+
+/**
+ * Sample a grid in the central ~40% of the map and pick open ground:
+ * prefer local height minima (valleys / plazas, not rooftops), then lowest Y,
+ * while avoiding deep pits when possible.
+ */
+export function findOpenSpawn(
+  getGroundHeight: (x: number, z: number) => number,
+  mapHalfExtent: number,
+): OpenSpawn {
+  const half = mapHalfExtent * SPAWN_SEARCH_FRACTION;
+  const n = SPAWN_GRID;
+  const heights: number[][] = [];
+  const xs: number[] = [];
+  const zs: number[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    xs.push(-half + t * half * 2);
+    zs.push(-half + t * half * 2);
+  }
+
+  for (let iz = 0; iz < n; iz++) {
+    heights[iz] = [];
+    for (let ix = 0; ix < n; ix++) {
+      heights[iz][ix] = getGroundHeight(xs[ix], zs[iz]);
+    }
+  }
+
+  type Candidate = { ix: number; iz: number; y: number; localMin: boolean };
+  const candidates: Candidate[] = [];
+
+  for (let iz = 0; iz < n; iz++) {
+    for (let ix = 0; ix < n; ix++) {
+      const y = heights[iz][ix];
+      let localMin = true;
+      for (let dz = -1; dz <= 1 && localMin; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dz === 0) continue;
+          const nix = ix + dx;
+          const niz = iz + dz;
+          if (nix < 0 || niz < 0 || nix >= n || niz >= n) continue;
+          if (heights[niz][nix] < y - 0.05) {
+            localMin = false;
+            break;
+          }
+        }
+      }
+      candidates.push({ ix, iz, y, localMin });
+    }
+  }
+
+  const aboveFloor = candidates.filter((c) => c.y >= SPAWN_MIN_FLOOR_Y);
+  const pool = aboveFloor.length > 0 ? aboveFloor : candidates;
+  const localMins = pool.filter((c) => c.localMin);
+  const ranked = (localMins.length > 0 ? localMins : pool).slice().sort((a, b) => a.y - b.y);
+  const best = ranked[0] ?? { ix: Math.floor(n / 2), iz: Math.floor(n / 2), y: FALLBACK_GROUND_Y };
+
+  return {
+    x: xs[best.ix],
+    z: zs[best.iz],
+    groundY: best.y,
+  };
+}
+
 /**
  * Load the Fruzer Polygon GLB, center/scale into the play area,
  * and return a world object compatible with the game loop.
@@ -284,7 +360,8 @@ export async function loadMapWorld(
   mapScaled.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
-    mesh.castShadow = true;
+    // Avoid self-shadow crush on mobile / software GL; still receive shadows
+    mesh.castShadow = false;
     mesh.receiveShadow = true;
     if (mesh.material) {
       const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
@@ -294,6 +371,8 @@ export async function loadMapWorld(
         if ('emissiveMap' in std && std.emissiveMap) {
           std.emissiveMap.colorSpace = THREE.SRGBColorSpace;
         }
+        if ('metalness' in std) std.metalness = 0;
+        if ('roughness' in std) std.roughness = 0.9;
         std.needsUpdate = true;
       }
     }
@@ -310,15 +389,12 @@ export async function loadMapWorld(
 
   const getGroundHeight = buildHeightSampler(colliders, bounds, FALLBACK_GROUND_Y);
 
-  // Spawn near map center on open ground
-  // Offset from exact center — often denser props/buildings there
-  const spawnX = 0;
-  const spawnZ = mapHalfExtent * 0.12;
-  const groundY = getGroundHeight(spawnX, spawnZ);
-  const spawnPosition = new THREE.Vector3(spawnX, groundY + 12, spawnZ);
+  // Prefer open-ground local minima in the central map (avoid rooftops)
+  const open = findOpenSpawn(getGroundHeight, mapHalfExtent);
+  const spawnPosition = new THREE.Vector3(open.x, open.groundY + 6, open.z);
 
   const landingPad = createLandingPad();
-  landingPad.position.set(spawnX, groundY + 0.12, spawnZ);
+  landingPad.position.set(open.x, open.groundY + 0.12, open.z);
   group.add(landingPad);
 
   scene.add(group);
