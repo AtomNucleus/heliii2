@@ -45,6 +45,8 @@ export class HelicopterController {
   private readonly verticalAccel = 22;
   private readonly drag = 1.8;
   private readonly turnSpeed = 2.2;
+  private worldBound = 105;
+  private maxAltitude = 70;
 
   private camOffset = new THREE.Vector3(0, 5.5, 14);
   private camLook = new THREE.Vector3();
@@ -110,6 +112,15 @@ export class HelicopterController {
       setKey(e.code, true);
     });
     window.addEventListener('keyup', (e) => setKey(e.code, false));
+  }
+
+  /** Soft clamp half-extent for XZ (map-dependent) */
+  setWorldBound(halfExtent: number) {
+    this.worldBound = halfExtent;
+  }
+
+  setMaxAltitude(y: number) {
+    this.maxAltitude = y;
   }
 
   reset(spawn: THREE.Vector3) {
@@ -205,10 +216,10 @@ export class HelicopterController {
     }
 
     // World bounds soft clamp
-    const bound = 105;
+    const bound = this.worldBound;
     this.heli.position.x = THREE.MathUtils.clamp(this.heli.position.x, -bound, bound);
     this.heli.position.z = THREE.MathUtils.clamp(this.heli.position.z, -bound, bound);
-    this.heli.position.y = Math.min(this.heli.position.y, 55);
+    this.heli.position.y = Math.min(this.heli.position.y, this.maxAltitude);
 
     // Visual banking / pitch
     const targetPitch = (this.input.forward ? -0.28 : 0) + (this.input.back ? 0.18 : 0);

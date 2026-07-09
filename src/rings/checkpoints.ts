@@ -8,11 +8,13 @@ export interface CheckpointRing {
   index: number;
 }
 
+export type RingLayout = Array<[number, number, number]>;
+
 const RING_RADIUS = 3.2;
 const COLLECT_RADIUS = 3.8;
 
-/** 10 checkpoint positions weaving across islands */
-const RING_LAYOUT: Array<[number, number, number]> = [
+/** Default layout (legacy island course) — prefer passing a map-based layout */
+export const DEFAULT_RING_LAYOUT: RingLayout = [
   [0, 8, 18],
   [18, 10, 35],
   [40, 12, 20],
@@ -29,16 +31,36 @@ export class CheckpointSystem {
   readonly rings: CheckpointRing[] = [];
   readonly group = new THREE.Group();
   nextIndex = 0;
-  readonly total = RING_LAYOUT.length;
+  total: number;
 
   private particlePools: THREE.Points[] = [];
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, layout: RingLayout = DEFAULT_RING_LAYOUT) {
     this.group.name = 'checkpoints';
-    RING_LAYOUT.forEach((pos, i) => {
+    this.total = layout.length;
+    this.buildFromLayout(layout);
+    scene.add(this.group);
+    this.refreshVisibility();
+  }
+
+  /** Replace ring positions (e.g. after map load). Keeps ring count if lengths match. */
+  setLayout(layout: RingLayout) {
+    // Clear existing
+    while (this.group.children.length) {
+      this.group.remove(this.group.children[0]);
+    }
+    this.rings.length = 0;
+    this.particlePools.length = 0;
+    this.nextIndex = 0;
+    this.total = layout.length;
+    this.buildFromLayout(layout);
+    this.refreshVisibility();
+  }
+
+  private buildFromLayout(layout: RingLayout) {
+    layout.forEach((pos, i) => {
       const ring = this.createRing(i);
       ring.position.set(pos[0], pos[1], pos[2]);
-      // Face roughly toward previous / next for variety
       ring.rotation.y = (i * 0.7) % (Math.PI * 2);
       ring.rotation.x = Math.sin(i) * 0.25;
 
@@ -55,8 +77,6 @@ export class CheckpointSystem {
       this.group.add(particles);
       this.particlePools.push(particles);
     });
-    scene.add(this.group);
-    this.refreshVisibility();
   }
 
   private createRing(index: number): THREE.Group {
@@ -76,7 +96,6 @@ export class CheckpointSystem {
     );
     g.add(torus);
 
-    // Inner glow shell
     const glow = new THREE.Mesh(
       new THREE.TorusGeometry(RING_RADIUS, 0.5, 8, 24),
       new THREE.MeshBasicMaterial({
@@ -89,7 +108,6 @@ export class CheckpointSystem {
     );
     g.add(glow);
 
-    // Number marker (small box cluster)
     const badge = new THREE.Mesh(
       new THREE.BoxGeometry(0.6, 0.6, 0.15),
       new THREE.MeshStandardMaterial({
@@ -137,7 +155,6 @@ export class CheckpointSystem {
         ring.mesh.visible = false;
         this.particlePools[i].visible = false;
       } else {
-        // Dim upcoming rings slightly
         ring.mesh.traverse((obj) => {
           if ((obj as THREE.Mesh).isMesh) {
             const mesh = obj as THREE.Mesh;

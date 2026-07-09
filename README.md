@@ -2,6 +2,8 @@
 
 Browser-based low-poly helicopter arcade game built with **Three.js**, **TypeScript**, and **Vite**.
 
+Fly a neon course over the **Fruzer Polygon** map (Chicken Gun–style battle-royale island).
+
 ## Play
 
 **Live:** https://gentle-druid-51a70b.netlify.app  
@@ -31,6 +33,15 @@ npx netlify deploy --dir dist --prod
 ```
 
 `netlify.toml` publishes `dist` after `npm run build`.
+
+## Map credit
+
+Playable map:
+[Chicken Gun Fruzer — Polygon](https://sketchfab.com/3d-models/chicken-gun-fruzer-polygon-f6bd85b8748a43fc95ee321f0e4a8677)
+by [amogusstrikesback2](https://sketchfab.com/amogusstrikesback2) on Sketchfab  
+License: **CC Attribution**
+
+Asset path: `public/maps/fruzer-polygon.glb`
 
 ## Controls
 

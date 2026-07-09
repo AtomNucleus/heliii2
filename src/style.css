@@ -185,6 +185,38 @@ body,
   opacity: 0.55;
 }
 
+.loading-status {
+  min-height: 1.25rem;
+  margin: -0.75rem 0 1.1rem;
+  font-size: 0.9rem;
+  letter-spacing: 0.06em;
+  color: var(--orange-glow);
+  opacity: 0.9;
+}
+
+.loading-status:empty {
+  display: none;
+}
+
+.credit {
+  margin-top: 1.15rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  color: rgba(160, 220, 200, 0.65);
+}
+
+.credit a {
+  color: var(--neon-green);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(57, 255, 154, 0.35);
+}
+
+.credit a:hover {
+  color: var(--orange-glow);
+  border-bottom-color: rgba(255, 179, 71, 0.5);
+}
+
 .final-time {
   font-family: 'Orbitron', sans-serif;
   font-size: 2.5rem;

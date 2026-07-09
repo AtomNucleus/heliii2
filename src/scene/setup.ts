@@ -29,7 +29,8 @@ export const COLORS = {
 export function createSceneSetup(canvas: HTMLCanvasElement) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(COLORS.skyTop);
-  scene.fog = new THREE.FogExp2(COLORS.fog, 0.0045);
+  // Lighter fog so the Fruzer Polygon map reads at distance
+  scene.fog = new THREE.FogExp2(COLORS.fog, 0.0028);
 
   const camera = new THREE.PerspectiveCamera(
     60,
@@ -58,11 +59,11 @@ export function createSceneSetup(canvas: HTMLCanvasElement) {
   sunLight.castShadow = true;
   sunLight.shadow.mapSize.set(2048, 2048);
   sunLight.shadow.camera.near = 10;
-  sunLight.shadow.camera.far = 250;
-  sunLight.shadow.camera.left = -100;
-  sunLight.shadow.camera.right = 100;
-  sunLight.shadow.camera.top = 100;
-  sunLight.shadow.camera.bottom = -100;
+  sunLight.shadow.camera.far = 350;
+  sunLight.shadow.camera.left = -140;
+  sunLight.shadow.camera.right = 140;
+  sunLight.shadow.camera.top = 140;
+  sunLight.shadow.camera.bottom = -140;
   sunLight.shadow.bias = -0.0005;
   scene.add(sunLight);
 
