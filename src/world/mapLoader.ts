@@ -173,7 +173,7 @@ const SPAWN_SEARCH_FRACTION = 0.5;
 /** Clear air required above ground so we don't spawn inside hangars */
 const SPAWN_CLEARANCE = 24;
 /** Hover height above chosen ground — high enough to read the base layout */
-export const SPAWN_HOVER = 55;
+export const SPAWN_HOVER = 28;
 
 /**
  * Bounds of the dense battle-royale base. Sketchfab exports include sparse
