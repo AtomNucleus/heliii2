@@ -2,10 +2,11 @@
 
 ## Live site (public, no password)
 
-**https://gentle-druid-51a70b.netlify.app**
+**https://splendid-granita-af9b87.netlify.app**
 
-- Site ID: `0c349ce1-b08b-441d-bc4c-84d13034fe19`
-- Deployed with `--allow-anonymous --created-via cli` (no drop password)
+Fruzer Polygon map build. Deployed with `--allow-anonymous --created-via cli` (no drop password).
+
+- Site ID: `919ea34e-14b2-4dfb-abef-a1bfff9227fe`
 
 ### Claim into your Netlify account (recommended)
 
@@ -14,9 +15,9 @@ Anonymous sites can be suspended if left unclaimed. Claim within ~1 hour:
 1. Log in: `netlify login`
 2. Run:
    ```bash
-   netlify claim --site 0c349ce1-b08b-441d-bc4c-84d13034fe19 --token eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzE1MzAsImV4cCI6MTc4MzU3NTEzMCwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJhNjQ1MzUzNC01Y2U0LTRlODktYmYxOC1iNTA5OTY5ODk2NTcifQ._MM3e7KGLFTuGPQ9Cq_wHKxjE0Y9Iyd1hpXHPJdnuu0
+   netlify claim --site 919ea34e-14b2-4dfb-abef-a1bfff9227fe --token eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzM1OTcsImV4cCI6MTc4MzU3NzE5NywiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJmMDE0MTc4NC04MDllLTRiYWQtODc4Yi05YzNhOGRkNmQ3YjgifQ.zxvWK4ZrS-WnCBuFDjDD6Clpbot2rScnDDskUQqydF0
    ```
-3. Or open: https://app.netlify.com/drop/gentle-druid-51a70b#drop_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzE1MzAsImV4cCI6MTc4MzU3NTEzMCwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJhNjQ1MzUzNC01Y2U0LTRlODktYmYxOC1iNTA5OTY5ODk2NTcifQ._MM3e7KGLFTuGPQ9Cq_wHKxjE0Y9Iyd1hpXHPJdnuu0
+3. Or open: https://app.netlify.com/drop/splendid-granita-af9b87#drop_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzM1OTcsImV4cCI6MTc4MzU3NzE5NywiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJmMDE0MTc4NC04MDllLTRiYWQtODc4Yi05YzNhOGRkNmQ3YjgifQ.zxvWK4ZrS-WnCBuFDjDD6Clpbot2rScnDDskUQqydF0
 
 ### Redeploy (public, no password)
 
