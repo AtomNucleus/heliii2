@@ -2,11 +2,11 @@
 
 ## Live site (public, no password)
 
-**https://ornate-mermaid-7f4f64.netlify.app**
+**https://spectacular-queijadas-3c2b43.netlify.app**
 
 Fruzer Polygon map build. Deployed with `--allow-anonymous --created-via cli` (no drop password).
 
-- Site ID: `3632e38a-054a-4d32-b01a-b3b206330f60`
+- Site ID: `a54b7c76-7ce6-447a-8f6e-b41c67663881`
 
 ### Claim into your Netlify account (recommended)
 
@@ -15,9 +15,9 @@ Anonymous sites can be suspended if left unclaimed. Claim within ~1 hour:
 1. Log in: `netlify login`
 2. Run:
    ```bash
-   netlify claim --site 3632e38a-054a-4d32-b01a-b3b206330f60 --token eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzQwMTMsImV4cCI6MTc4MzU3NzYxMywiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiIzM2UxNTNmNy0xMzIxLTQwYmMtYTRmYi03YjljZWY2NTFlZTkifQ.xCRRD6TpUar_80n22r0ZdqRKFD5sRNc5NW6mZBMbCvg
+   netlify claim --site a54b7c76-7ce6-447a-8f6e-b41c67663881 --token eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzQ1MDIsImV4cCI6MTc4MzU3ODEwMiwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiIxNjA5Y2U1Ni0wN2QwLTQ4ZDMtOWU1Mi1lNjkxOGU0ZDk5NGIifQ.TQn3m8uBEY4t3nEdXai2STYUEM8_MOSfY5-KZLT3Ue4
    ```
-3. Or open: https://app.netlify.com/drop/ornate-mermaid-7f4f64#drop_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzQwMTMsImV4cCI6MTc4MzU3NzYxMywiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiIzM2UxNTNmNy0xMzIxLTQwYmMtYTRmYi03YjljZWY2NTFlZTkifQ.xCRRD6TpUar_80n22r0ZdqRKFD5sRNc5NW6mZBMbCvg
+3. Or open: https://app.netlify.com/drop/spectacular-queijadas-3c2b43#drop_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzQ1MDIsImV4cCI6MTc4MzU3ODEwMiwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiIxNjA5Y2U1Ni0wN2QwLTQ4ZDMtOWU1Mi1lNjkxOGU0ZDk5NGIifQ.TQn3m8uBEY4t3nEdXai2STYUEM8_MOSfY5-KZLT3Ue4
 
 ### Redeploy (public, no password)
 

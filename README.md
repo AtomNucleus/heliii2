@@ -6,7 +6,7 @@ Fly a neon course over the **Fruzer Polygon** map (Chicken Gun–style battle-ro
 
 ## Play
 
-**Live:** https://ornate-mermaid-7f4f64.netlify.app  
+**Live:** https://spectacular-queijadas-3c2b43.netlify.app  
 
 Public deploy (no password). Claim it into your Netlify account soon so it is not suspended — see `NETLIFY_DEPLOY.md`.
 
