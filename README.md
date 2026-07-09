@@ -4,7 +4,7 @@ Browser-based low-poly helicopter arcade game built with **Three.js**, **TypeScr
 
 ## Play
 
-**Live:** https://gentle-druid-51a70b.netlify.app  
+**Live:** https://friendly-figolla-4e95d9.netlify.app  
 
 Public deploy (no password). Claim it into your Netlify account soon so it is not suspended — see `NETLIFY_DEPLOY.md`.
 

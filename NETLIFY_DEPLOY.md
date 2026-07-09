@@ -2,9 +2,9 @@
 
 ## Live site (public, no password)
 
-**https://gentle-druid-51a70b.netlify.app**
+**https://friendly-figolla-4e95d9.netlify.app**
 
-- Site ID: `0c349ce1-b08b-441d-bc4c-84d13034fe19`
+- Site ID: `c6685e60-1779-4c81-b066-77514e27ca5d`
 - Deployed with `--allow-anonymous --created-via cli` (no drop password)
 
 ### Claim into your Netlify account (recommended)
@@ -14,9 +14,9 @@ Anonymous sites can be suspended if left unclaimed. Claim within ~1 hour:
 1. Log in: `netlify login`
 2. Run:
    ```bash
-   netlify claim --site 0c349ce1-b08b-441d-bc4c-84d13034fe19 --token eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzE1MzAsImV4cCI6MTc4MzU3NTEzMCwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJhNjQ1MzUzNC01Y2U0LTRlODktYmYxOC1iNTA5OTY5ODk2NTcifQ._MM3e7KGLFTuGPQ9Cq_wHKxjE0Y9Iyd1hpXHPJdnuu0
+   netlify claim --site c6685e60-1779-4c81-b066-77514e27ca5d --token eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzIyNTYsImV4cCI6MTc4MzU3NTg1NiwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJiNTE0YjJjYi02M2NiLTRiODYtOGIwOS0zNjMyZjc3OWNmZjQifQ.qSFDB6qt_mp8oXb6IXfIoauy3RAhvtRNms2t9zrr5PA
    ```
-3. Or open: https://app.netlify.com/drop/gentle-druid-51a70b#drop_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzE1MzAsImV4cCI6MTc4MzU3NTEzMCwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJhNjQ1MzUzNC01Y2U0LTRlODktYmYxOC1iNTA5OTY5ODk2NTcifQ._MM3e7KGLFTuGPQ9Cq_wHKxjE0Y9Iyd1hpXHPJdnuu0
+3. Or open: https://app.netlify.com/drop/friendly-figolla-4e95d9#drop_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzIyNTYsImV4cCI6MTc4MzU3NTg1NiwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJiNTE0YjJjYi02M2NiLTRiODYtOGIwOS0zNjMyZjc3OWNmZjQifQ.qSFDB6qt_mp8oXb6IXfIoauy3RAhvtRNms2t9zrr5PA
 
 ### Redeploy (public, no password)
 
