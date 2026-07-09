@@ -149,7 +149,7 @@ async function boot() {
     controller = new HelicopterController(heli, camera, world.getGroundHeight);
     controller.setWorldBound(world.mapHalfExtent + 8);
     if (typeof controller.setMaxAltitude === 'function') {
-      controller.setMaxAltitude(world.bounds.max.y + 40);
+      controller.setMaxAltitude(Math.max(200, world.bounds.max.y + 80));
     }
     controller.reset(world.spawnPosition);
 

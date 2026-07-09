@@ -15,9 +15,9 @@ export function createPostProcessing(
 
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.55, // strength
+    0.28, // strength — avoid crushing terrain on software GL
     0.4, // radius
-    0.72, // threshold — keep terrain dark, glow sun/rings/HUD-ish emissives
+    0.85, // threshold — only bright emissives bloom
   );
   composer.addPass(bloom);
   composer.addPass(new OutputPass());

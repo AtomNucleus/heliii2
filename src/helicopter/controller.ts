@@ -55,13 +55,13 @@ export class HelicopterController {
   private readonly keyboardInput = createInputState();
   private readonly touchInput = createInputState();
 
-  private readonly maxSpeed = 42;
+  private readonly maxSpeed = 55;
   private readonly accel = 28;
-  private readonly verticalAccel = 22;
+  private readonly verticalAccel = 38;
   private readonly drag = 1.8;
   private readonly turnSpeed = 2.2;
   private worldBound = 105;
-  private maxAltitude = 70;
+  private maxAltitude = 200;
 
   private camOffset = new THREE.Vector3(0, 5.5, 14);
   private camLook = new THREE.Vector3();
@@ -223,17 +223,17 @@ export class HelicopterController {
     if (this.input.up) accel.y += this.verticalAccel;
     if (this.input.down) accel.y -= this.verticalAccel;
 
-    // Light gravity / hover bias
+    // Light gravity / hover bias — skip while climbing so Space actually lifts
     if (!this.input.up && !this.input.down) {
       accel.y -= 4;
     }
 
     this.velocity.addScaledVector(accel, dt);
 
-    // Drag
+    // Drag (lighter vertical so climb works on large maps)
     this.velocity.x *= Math.exp(-this.drag * dt);
     this.velocity.z *= Math.exp(-this.drag * dt);
-    this.velocity.y *= Math.exp(-1.2 * dt);
+    this.velocity.y *= Math.exp(-0.75 * dt);
 
     // Clamp speed
     const horiz = new THREE.Vector2(this.velocity.x, this.velocity.z);
@@ -242,13 +242,13 @@ export class HelicopterController {
       this.velocity.x = horiz.x;
       this.velocity.z = horiz.y;
     }
-    this.velocity.y = THREE.MathUtils.clamp(this.velocity.y, -25, 22);
+    this.velocity.y = THREE.MathUtils.clamp(this.velocity.y, -28, 32);
 
     this.heli.position.addScaledVector(this.velocity, dt);
 
     // Soft ground collision
     const ground = this.getGroundHeight(this.heli.position.x, this.heli.position.z);
-    const minY = ground + 1.2;
+    const minY = ground + 2.0;
     if (this.heli.position.y < minY) {
       this.heli.position.y = minY;
       if (this.velocity.y < 0) this.velocity.y *= -0.2;

@@ -30,13 +30,13 @@ export function createSceneSetup(canvas: HTMLCanvasElement) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(COLORS.skyTop);
   // Light fog so textured Fruzer Polygon materials stay readable at distance
-  scene.fog = new THREE.FogExp2(COLORS.fog, 0.002);
+  scene.fog = new THREE.FogExp2(COLORS.fog, 0.0015);
 
   const camera = new THREE.PerspectiveCamera(
     60,
     window.innerWidth / window.innerHeight,
     0.5,
-    800,
+    1200,
   );
   camera.position.set(0, 12, 20);
 
@@ -48,8 +48,8 @@ export function createSceneSetup(canvas: HTMLCanvasElement) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  // Higher exposure so textured BR materials aren't crushed by ACES
-  renderer.toneMappingExposure = 1.3;
+  // Higher exposure so textured BR materials aren't crushed by ACES / soft GL
+  renderer.toneMappingExposure = 1.45;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -73,10 +73,10 @@ export function createSceneSetup(canvas: HTMLCanvasElement) {
   fillLight.position.set(-40, 20, 30);
   scene.add(fillLight);
 
-  const ambient = new THREE.AmbientLight(0x5a7080, 0.72);
+  const ambient = new THREE.AmbientLight(0x5a7080, 0.9);
   scene.add(ambient);
 
-  const hemi = new THREE.HemisphereLight(COLORS.orangeGlow, COLORS.tealDeep, 0.7);
+  const hemi = new THREE.HemisphereLight(COLORS.orangeGlow, COLORS.tealDeep, 0.85);
   scene.add(hemi);
 
   const onResize = () => {

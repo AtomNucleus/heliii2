@@ -4,7 +4,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { COLORS } from '../scene/setup';
 
 /** Target play-area width (largest XZ extent after scale), in world units */
-export const MAP_TARGET_SIZE = 320;
+export const MAP_TARGET_SIZE = 380;
 /** Fallback ground Y when a raycast misses */
 export const FALLBACK_GROUND_Y = 0;
 /** Height-sample grid resolution (cells per side) */
@@ -226,11 +226,9 @@ function buildHeightSampler(
   };
 }
 
-const SPAWN_GRID = 11;
+const SPAWN_GRID = 15;
 /** Central fraction of mapHalfExtent used for spawn search */
-const SPAWN_SEARCH_FRACTION = 0.4;
-/** Reject deep pits / water-like samples when better options exist */
-const SPAWN_MIN_FLOOR_Y = 0.5;
+const SPAWN_SEARCH_FRACTION = 0.55;
 
 export interface OpenSpawn {
   x: number;
@@ -238,10 +236,20 @@ export interface OpenSpawn {
   groundY: number;
 }
 
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = THREE.MathUtils.clamp(p, 0, 1) * (sorted.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  const t = idx - lo;
+  return sorted[lo] * (1 - t) + sorted[hi] * t;
+}
+
 /**
- * Sample a grid in the central ~40% of the map and pick open ground:
- * prefer local height minima (valleys / plazas, not rooftops), then lowest Y,
- * while avoiding deep pits when possible.
+ * Sample a wide grid over the central ~55% of the map and score open ground:
+ * prefer local minima (plazas, not rooftops), mid-percentile heights
+ * (avoid deepest pits and high roofs), and flat neighborhoods.
  */
 export function findOpenSpawn(
   getGroundHeight: (x: number, z: number) => number,
@@ -259,46 +267,80 @@ export function findOpenSpawn(
     zs.push(-half + t * half * 2);
   }
 
+  const allY: number[] = [];
   for (let iz = 0; iz < n; iz++) {
     heights[iz] = [];
     for (let ix = 0; ix < n; ix++) {
-      heights[iz][ix] = getGroundHeight(xs[ix], zs[iz]);
+      const y = getGroundHeight(xs[ix], zs[iz]);
+      heights[iz][ix] = y;
+      allY.push(y);
     }
   }
 
-  type Candidate = { ix: number; iz: number; y: number; localMin: boolean };
-  const candidates: Candidate[] = [];
+  const sortedY = allY.slice().sort((a, b) => a - b);
+  const y25 = percentile(sortedY, 0.25);
+  const y55 = percentile(sortedY, 0.55);
+
+  type Scored = { ix: number; iz: number; y: number; score: number };
+  let best: Scored | null = null;
 
   for (let iz = 0; iz < n; iz++) {
     for (let ix = 0; ix < n; ix++) {
       const y = heights[iz][ix];
+
       let localMin = true;
-      for (let dz = -1; dz <= 1 && localMin; dz++) {
+      let neighborSum = 0;
+      let neighborCount = 0;
+      let varianceSum = 0;
+
+      for (let dz = -1; dz <= 1; dz++) {
         for (let dx = -1; dx <= 1; dx++) {
           if (dx === 0 && dz === 0) continue;
           const nix = ix + dx;
           const niz = iz + dz;
           if (nix < 0 || niz < 0 || nix >= n || niz >= n) continue;
-          if (heights[niz][nix] < y - 0.05) {
-            localMin = false;
-            break;
-          }
+          const ny = heights[niz][nix];
+          if (ny < y - 0.05) localMin = false;
+          neighborSum += ny;
+          neighborCount++;
+          const d = ny - y;
+          varianceSum += d * d;
         }
       }
-      candidates.push({ ix, iz, y, localMin });
+
+      const localVariance = neighborCount > 0 ? varianceSum / neighborCount : 0;
+      const meanNeighbor = neighborCount > 0 ? neighborSum / neighborCount : y;
+
+      // Prefer mid-band heights (25th–55th percentile)
+      let heightScore = 0;
+      if (y >= y25 && y <= y55) {
+        heightScore = 3;
+      } else if (y < y25) {
+        // Deep pits — soft penalty proportional to how far below band
+        const span = Math.max(0.5, y55 - sortedY[0]);
+        heightScore = -2 * ((y25 - y) / span);
+      } else {
+        // Rooftops / high ground
+        const span = Math.max(0.5, sortedY[sortedY.length - 1] - y55);
+        heightScore = -2.5 * ((y - y55) / span);
+      }
+
+      const localMinScore = localMin ? 2.5 : y <= meanNeighbor + 0.15 ? 0.5 : -1.5;
+      const flatScore = 1.5 / (1 + localVariance);
+
+      const score = heightScore + localMinScore + flatScore;
+      if (!best || score > best.score) {
+        best = { ix, iz, y, score };
+      }
     }
   }
 
-  const aboveFloor = candidates.filter((c) => c.y >= SPAWN_MIN_FLOOR_Y);
-  const pool = aboveFloor.length > 0 ? aboveFloor : candidates;
-  const localMins = pool.filter((c) => c.localMin);
-  const ranked = (localMins.length > 0 ? localMins : pool).slice().sort((a, b) => a.y - b.y);
-  const best = ranked[0] ?? { ix: Math.floor(n / 2), iz: Math.floor(n / 2), y: FALLBACK_GROUND_Y };
+  const pick = best ?? { ix: Math.floor(n / 2), iz: Math.floor(n / 2), y: FALLBACK_GROUND_Y, score: 0 };
 
   return {
-    x: xs[best.ix],
-    z: zs[best.iz],
-    groundY: best.y,
+    x: xs[pick.ix],
+    z: zs[pick.iz],
+    groundY: pick.y,
   };
 }
 
@@ -389,9 +431,15 @@ export async function loadMapWorld(
 
   const getGroundHeight = buildHeightSampler(colliders, bounds, FALLBACK_GROUND_Y);
 
-  // Prefer open-ground local minima in the central map (avoid rooftops)
+  // Prefer open-ground local minima in the central map (avoid rooftops / pits)
   const open = findOpenSpawn(getGroundHeight, mapHalfExtent);
-  const spawnPosition = new THREE.Vector3(open.x, open.groundY + 6, open.z);
+  const spawnPosition = new THREE.Vector3(open.x, open.groundY + 18, open.z);
+  console.info('[map] spawn', {
+    x: open.x,
+    z: open.z,
+    groundY: open.groundY,
+    heliY: spawnPosition.y,
+  });
 
   const landingPad = createLandingPad();
   landingPad.position.set(open.x, open.groundY + 0.12, open.z);
@@ -435,7 +483,8 @@ export function buildFigureEightRingLayout(
     const x = (a * c) / denom;
     const z = (a * s * c) / denom;
     const ground = getGroundHeight(x, z);
-    const alt = 10 + (i % 3) * 3.5 + Math.sin(i * 1.3) * 2;
+    // Keep rings well above dirt pits / hangar floors on large Fruzer scale
+    const alt = 14 + (i % 3) * 5 + Math.sin(i * 1.3) * 4;
     layout.push([x, ground + alt, z]);
   }
 
