@@ -1,20 +1,33 @@
-# Netlify anonymous deploy (claimable)
+# Netlify deploy
 
-- Site URL: https://euphonious-lokum-d5606e.netlify.app
-- Site ID: b73b9471-a7ff-4bc5-a94b-f25e262e9be3
-- Deploy password (if prompted): My-Drop-Site
-- Claim in browser: https://app.netlify.com/drop/euphonious-lokum-d5606e
-  (open the claim_url from the deploy JSON if the drop page asks for a token)
+## Live site (public, no password)
 
-To claim into your Netlify account (token expires ~1 hour after deploy):
+**https://gentle-druid-51a70b.netlify.app**
 
-```bash
-netlify claim --site b73b9471-a7ff-4bc5-a94b-f25e262e9be3 --token <token-from-deploy-output>
-```
+- Site ID: `0c349ce1-b08b-441d-bc4c-84d13034fe19`
+- Deployed with `--allow-anonymous --created-via cli` (no drop password)
 
-Or redeploy after `netlify login`:
+### Claim into your Netlify account (recommended)
+
+Anonymous sites can be suspended if left unclaimed. Claim within ~1 hour:
+
+1. Log in: `netlify login`
+2. Run:
+   ```bash
+   netlify claim --site 0c349ce1-b08b-441d-bc4c-84d13034fe19 --token eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzE1MzAsImV4cCI6MTc4MzU3NTEzMCwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJhNjQ1MzUzNC01Y2U0LTRlODktYmYxOC1iNTA5OTY5ODk2NTcifQ._MM3e7KGLFTuGPQ9Cq_wHKxjE0Y9Iyd1hpXHPJdnuu0
+   ```
+3. Or open: https://app.netlify.com/drop/gentle-druid-51a70b#drop_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzE1MzAsImV4cCI6MTc4MzU3NTEzMCwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJhNjQ1MzUzNC01Y2U0LTRlODktYmYxOC1iNTA5OTY5ODk2NTcifQ._MM3e7KGLFTuGPQ9Cq_wHKxjE0Y9Iyd1hpXHPJdnuu0
+
+### Redeploy (public, no password)
 
 ```bash
 npm run build
-npx netlify deploy --dir dist --prod --site-name heli-sunset
+npx netlify deploy --allow-anonymous --created-via cli --dir dist --no-build --prod
+```
+
+After claiming / logging in:
+
+```bash
+npm run build
+npx netlify deploy --dir dist --prod
 ```

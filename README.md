@@ -4,9 +4,9 @@ Browser-based low-poly helicopter arcade game built with **Three.js**, **TypeScr
 
 ## Play
 
-**Live (Netlify claimable deploy):** https://euphonious-lokum-d5606e.netlify.app  
-Password if prompted: `My-Drop-Site`  
-See `NETLIFY_DEPLOY.md` to claim the site into your Netlify account.
+**Live:** https://gentle-druid-51a70b.netlify.app  
+
+Public deploy (no password). Claim it into your Netlify account soon so it is not suspended — see `NETLIFY_DEPLOY.md`.
 
 ## Run locally
 
