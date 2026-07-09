@@ -32,6 +32,7 @@ body,
   width: 100%;
   height: 100%;
   outline: none;
+  touch-action: none;
 }
 
 /* ---- HUD ---- */
@@ -198,6 +199,196 @@ body,
   display: none !important;
 }
 
+/* ---- Mobile touch controls ---- */
+.mobile-controls {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  pointer-events: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mobile-controls * {
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-steer-zone,
+.mobile-altitude-zone,
+.mobile-restart {
+  pointer-events: auto;
+}
+
+.mobile-steer-zone {
+  position: absolute;
+  left: calc(1rem + env(safe-area-inset-left));
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  width: clamp(8rem, 30vw, 10.5rem);
+  height: clamp(8rem, 30vw, 10.5rem);
+}
+
+.mobile-stick {
+  --stick-x: 0px;
+  --stick-y: 0px;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 1px solid rgba(57, 255, 154, 0.55);
+  background:
+    radial-gradient(circle at 50% 50%, rgba(57, 255, 154, 0.18), transparent 35%),
+    linear-gradient(145deg, rgba(8, 30, 34, 0.72), rgba(18, 50, 55, 0.42));
+  box-shadow:
+    0 0 24px rgba(57, 255, 154, 0.18),
+    inset 0 0 28px rgba(57, 255, 154, 0.08);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+}
+
+.mobile-stick::before,
+.mobile-stick::after {
+  content: '';
+  position: absolute;
+  background: rgba(57, 255, 154, 0.25);
+  pointer-events: none;
+}
+
+.mobile-stick::before {
+  top: 14%;
+  bottom: 14%;
+  left: 50%;
+  width: 1px;
+}
+
+.mobile-stick::after {
+  top: 50%;
+  left: 14%;
+  right: 14%;
+  height: 1px;
+}
+
+.mobile-stick-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 42%;
+  height: 42%;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 179, 71, 0.8);
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.22), transparent 28%),
+    linear-gradient(160deg, rgba(255, 140, 58, 0.92), rgba(57, 255, 154, 0.74));
+  box-shadow:
+    0 0 20px rgba(255, 140, 58, 0.45),
+    0 0 34px rgba(57, 255, 154, 0.2);
+  transform: translate(calc(-50% + var(--stick-x)), calc(-50% + var(--stick-y)));
+  transition: transform 0.08s ease-out;
+  pointer-events: none;
+}
+
+.mobile-stick-label {
+  position: absolute;
+  z-index: 1;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: rgba(180, 255, 220, 0.7);
+  text-shadow: 0 0 8px rgba(57, 255, 154, 0.45);
+  pointer-events: none;
+}
+
+.mobile-stick-label-top {
+  top: 0.65rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.mobile-stick-label-bottom {
+  bottom: 0.65rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.mobile-stick-label-left {
+  top: 50%;
+  left: 0.55rem;
+  transform: translateY(-50%) rotate(-90deg);
+}
+
+.mobile-stick-label-right {
+  top: 50%;
+  right: 0.35rem;
+  transform: translateY(-50%) rotate(90deg);
+}
+
+.mobile-altitude-zone {
+  position: absolute;
+  right: calc(1rem + env(safe-area-inset-right));
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  display: grid;
+  gap: 0.85rem;
+}
+
+.mobile-altitude-button,
+.mobile-restart {
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--teal-deep);
+  border: 1px solid rgba(57, 255, 154, 0.5);
+  background: linear-gradient(180deg, rgba(57, 255, 154, 0.94), rgba(42, 216, 122, 0.86));
+  box-shadow:
+    0 0 18px rgba(57, 255, 154, 0.35),
+    inset 0 0 14px rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(5px);
+}
+
+.mobile-altitude-button {
+  min-width: 5.25rem;
+  min-height: 5.25rem;
+  border-radius: 999px;
+  font-size: 0.95rem;
+}
+
+.mobile-altitude-button-descend {
+  background: linear-gradient(180deg, rgba(255, 179, 71, 0.94), rgba(255, 140, 58, 0.84));
+  box-shadow:
+    0 0 18px rgba(255, 140, 58, 0.38),
+    inset 0 0 14px rgba(255, 255, 255, 0.14);
+}
+
+.mobile-altitude-button.is-active,
+.mobile-altitude-button:active,
+.mobile-restart:active {
+  transform: translateY(2px) scale(0.97);
+  filter: brightness(1.18);
+  box-shadow:
+    0 0 28px rgba(57, 255, 154, 0.62),
+    inset 0 0 20px rgba(255, 255, 255, 0.24);
+}
+
+.mobile-altitude-button-descend.is-active,
+.mobile-altitude-button-descend:active {
+  box-shadow:
+    0 0 28px rgba(255, 140, 58, 0.68),
+    inset 0 0 20px rgba(255, 255, 255, 0.22);
+}
+
+.mobile-restart {
+  position: absolute;
+  top: calc(1rem + env(safe-area-inset-top));
+  right: calc(1rem + env(safe-area-inset-right));
+  min-width: 3.25rem;
+  min-height: 2.65rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.6rem;
+  font-size: 0.68rem;
+  opacity: 0.8;
+}
+
 @media (max-width: 600px) {
   .hud {
     top: 0.6rem;
@@ -213,5 +404,16 @@ body,
   .overlay-panel {
     margin: 1rem;
     padding: 1.5rem 1.25rem;
+  }
+
+  .mobile-steer-zone {
+    width: clamp(7.5rem, 36vw, 9rem);
+    height: clamp(7.5rem, 36vw, 9rem);
+  }
+
+  .mobile-altitude-button {
+    min-width: 4.6rem;
+    min-height: 4.6rem;
+    font-size: 0.8rem;
   }
 }

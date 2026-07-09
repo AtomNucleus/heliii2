@@ -5,6 +5,7 @@ import { loadHelicopter } from './models/helicopter';
 import { HelicopterController } from './helicopter/controller';
 import { CheckpointSystem } from './rings/checkpoints';
 import { HUD } from './hud/hud';
+import { MobileControls } from './hud/mobileControls';
 import { createPostProcessing, ExhaustParticles } from './effects/postprocessing';
 
 type GamePhase = 'start' | 'playing' | 'complete';
@@ -44,6 +45,13 @@ async function init() {
   let phase: GamePhase = 'start';
   let elapsed = 0;
   let clock = new THREE.Clock();
+  const mobileControls = new MobileControls({
+    setInput: (input) => controller.setTouchInput(input),
+    clearInput: () => controller.clearTouchInput(),
+    onRestart: () => {
+      if (phase === 'playing') restartGame();
+    },
+  });
 
   function startGame() {
     phase = 'playing';
@@ -55,12 +63,14 @@ async function init() {
     completeOverlay.classList.add('hidden');
     hud.show();
     hud.update(0, 0, controller.getAltitude(), 0);
+    mobileControls.show();
     clock.start();
   }
 
   function completeGame() {
     phase = 'complete';
     controller.enabled = false;
+    mobileControls.hide();
     finalTimeEl.textContent = hud.formatTime(elapsed);
     completeOverlay.classList.remove('hidden');
   }

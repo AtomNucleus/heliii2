@@ -18,14 +18,8 @@ export interface FlightState {
   speed: number;
 }
 
-/**
- * Arcade helicopter controller: WASD / arrows + Space/Shift,
- * soft banking, chase camera, soft ground collision.
- */
-export class HelicopterController {
-  readonly heli: THREE.Group;
-  readonly camera: THREE.PerspectiveCamera;
-  readonly input: InputState = {
+function createInputState(): InputState {
+  return {
     forward: false,
     back: false,
     left: false,
@@ -33,12 +27,33 @@ export class HelicopterController {
     up: false,
     down: false,
   };
+}
+
+function resetInputState(input: InputState) {
+  input.forward = false;
+  input.back = false;
+  input.left = false;
+  input.right = false;
+  input.up = false;
+  input.down = false;
+}
+
+/**
+ * Arcade helicopter controller: WASD / arrows + Space/Shift,
+ * soft banking, chase camera, soft ground collision.
+ */
+export class HelicopterController {
+  readonly heli: THREE.Group;
+  readonly camera: THREE.PerspectiveCamera;
+  readonly input: InputState = createInputState();
 
   private yaw = 0;
   private pitch = 0;
   private roll = 0;
   private velocity = new THREE.Vector3();
   private getGroundHeight: (x: number, z: number) => number;
+  private readonly keyboardInput = createInputState();
+  private readonly touchInput = createInputState();
 
   private readonly maxSpeed = 42;
   private readonly accel = 28;
@@ -79,28 +94,29 @@ export class HelicopterController {
       switch (code) {
         case 'KeyW':
         case 'ArrowUp':
-          this.input.forward = pressed;
+          this.keyboardInput.forward = pressed;
           break;
         case 'KeyS':
         case 'ArrowDown':
-          this.input.back = pressed;
+          this.keyboardInput.back = pressed;
           break;
         case 'KeyA':
         case 'ArrowLeft':
-          this.input.left = pressed;
+          this.keyboardInput.left = pressed;
           break;
         case 'KeyD':
         case 'ArrowRight':
-          this.input.right = pressed;
+          this.keyboardInput.right = pressed;
           break;
         case 'Space':
-          this.input.up = pressed;
+          this.keyboardInput.up = pressed;
           break;
         case 'ShiftLeft':
         case 'ShiftRight':
-          this.input.down = pressed;
+          this.keyboardInput.down = pressed;
           break;
       }
+      this.syncInput();
     };
 
     window.addEventListener('keydown', (e) => {
@@ -110,6 +126,25 @@ export class HelicopterController {
       setKey(e.code, true);
     });
     window.addEventListener('keyup', (e) => setKey(e.code, false));
+  }
+
+  setTouchInput(nextInput: Partial<InputState>) {
+    Object.assign(this.touchInput, nextInput);
+    this.syncInput();
+  }
+
+  clearTouchInput() {
+    resetInputState(this.touchInput);
+    this.syncInput();
+  }
+
+  private syncInput() {
+    this.input.forward = this.keyboardInput.forward || this.touchInput.forward;
+    this.input.back = this.keyboardInput.back || this.touchInput.back;
+    this.input.left = this.keyboardInput.left || this.touchInput.left;
+    this.input.right = this.keyboardInput.right || this.touchInput.right;
+    this.input.up = this.keyboardInput.up || this.touchInput.up;
+    this.input.down = this.keyboardInput.down || this.touchInput.down;
   }
 
   reset(spawn: THREE.Vector3) {
