@@ -4,7 +4,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { COLORS } from '../scene/setup';
 
 /** Target play-area width (largest XZ extent after scale), in world units */
-export const MAP_TARGET_SIZE = 200;
+export const MAP_TARGET_SIZE = 280;
 /** Fallback ground Y when a raycast misses */
 export const FALLBACK_GROUND_Y = 0;
 /** Height-sample grid resolution (cells per side) */
@@ -311,10 +311,11 @@ export async function loadMapWorld(
   const getGroundHeight = buildHeightSampler(colliders, bounds, FALLBACK_GROUND_Y);
 
   // Spawn near map center on open ground
+  // Offset from exact center — often denser props/buildings there
   const spawnX = 0;
-  const spawnZ = 0;
+  const spawnZ = mapHalfExtent * 0.12;
   const groundY = getGroundHeight(spawnX, spawnZ);
-  const spawnPosition = new THREE.Vector3(spawnX, groundY + 8, spawnZ);
+  const spawnPosition = new THREE.Vector3(spawnX, groundY + 12, spawnZ);
 
   const landingPad = createLandingPad();
   landingPad.position.set(spawnX, groundY + 0.12, spawnZ);
