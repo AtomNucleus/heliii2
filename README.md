@@ -6,7 +6,7 @@ Fly a neon course over the **Fruzer Polygon** map (Chicken Gun–style battle-ro
 
 ## Play
 
-**Live:** https://flourishing-cactus-903a36.netlify.app  
+**Live:** https://superb-moxie-5b001c.netlify.app  
 
 Public deploy (no password). Claim it into your Netlify account soon so it is not suspended — see `NETLIFY_DEPLOY.md`.
 
