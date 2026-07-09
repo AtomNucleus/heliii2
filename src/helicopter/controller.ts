@@ -146,7 +146,8 @@ export class HelicopterController {
   }
 
   update(dt: number) {
-    // Rotor animation always runs for visual life
+    // Rotor animation always runs for visual life.
+    // Main rotor: spin about Y (blades in XZ). Tail: spin about X (blades in YZ).
     const rotorSpeed = 28 + this.getSpeed() * 0.4;
     if (this.mainRotor) this.mainRotor.rotation.y += rotorSpeed * dt;
     if (this.tailRotor) this.tailRotor.rotation.x += rotorSpeed * 1.6 * dt;
