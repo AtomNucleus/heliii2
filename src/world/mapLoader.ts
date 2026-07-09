@@ -4,7 +4,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { COLORS } from '../scene/setup';
 
 /** Target play-area width (largest XZ extent after scale), in world units */
-export const MAP_TARGET_SIZE = 380;
+export const MAP_TARGET_SIZE = 260;
 /** Fallback ground Y when a raycast misses */
 export const FALLBACK_GROUND_Y = 0;
 /** Height-sample grid resolution (cells per side) */
@@ -167,18 +167,138 @@ function createLandingPad(): THREE.Group {
   return pad;
 }
 
-const SPAWN_GRID = 17;
+const SPAWN_GRID = 19;
 /** Central fraction of mapHalfExtent used for spawn search */
-const SPAWN_SEARCH_FRACTION = 0.45;
+const SPAWN_SEARCH_FRACTION = 0.5;
 /** Clear air required above ground so we don't spawn inside hangars */
-const SPAWN_CLEARANCE = 28;
-/** Hover height above chosen ground */
-export const SPAWN_HOVER = 22;
+const SPAWN_CLEARANCE = 24;
+/** Hover height above chosen ground — high enough to read the base layout */
+export const SPAWN_HOVER = 55;
+
+/**
+ * Bounds of the dense battle-royale base. Sketchfab exports include sparse
+ * outlier verts (distant water / props) that inflate AABB; we find the peak
+ * XZ density cell, grow a connected component, then take percentile Y.
+ */
+function computeRobustBounds(root: THREE.Object3D): {
+  box: THREE.Box3;
+  sampleCount: number;
+} {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const zs: number[] = [];
+  const v = new THREE.Vector3();
+  const stride = 7;
+
+  root.updateMatrixWorld(true);
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry?.attributes?.position) return;
+    const pos = mesh.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i += stride) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+      xs.push(v.x);
+      ys.push(v.y);
+      zs.push(v.z);
+    }
+  });
+
+  if (xs.length < 64) {
+    const box = new THREE.Box3().setFromObject(root);
+    return { box, sampleCount: xs.length };
+  }
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < xs.length; i++) {
+    if (xs[i] < minX) minX = xs[i];
+    if (xs[i] > maxX) maxX = xs[i];
+    if (zs[i] < minZ) minZ = zs[i];
+    if (zs[i] > maxZ) maxZ = zs[i];
+  }
+
+  const bins = 80;
+  const spanX = Math.max(1e-3, maxX - minX);
+  const spanZ = Math.max(1e-3, maxZ - minZ);
+  const hist = new Float64Array(bins * bins);
+  for (let i = 0; i < xs.length; i++) {
+    const ix = Math.min(bins - 1, Math.floor(((xs[i] - minX) / spanX) * bins));
+    const iz = Math.min(bins - 1, Math.floor(((zs[i] - minZ) / spanZ) * bins));
+    hist[iz * bins + ix]++;
+  }
+
+  let peak = 0;
+  let peakI = 0;
+  for (let i = 0; i < hist.length; i++) {
+    if (hist[i] > peak) {
+      peak = hist[i];
+      peakI = i;
+    }
+  }
+
+  const thresh = peak * 0.05;
+  const visited = new Uint8Array(bins * bins);
+  const queue = [peakI];
+  visited[peakI] = 1;
+  const component: number[] = [];
+  while (queue.length) {
+    const cur = queue.pop()!;
+    if (hist[cur] < thresh) continue;
+    component.push(cur);
+    const cx = cur % bins;
+    const cz = Math.floor(cur / bins);
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dz === 0) continue;
+        const nx = cx + dx;
+        const nz = cz + dz;
+        if (nx < 0 || nz < 0 || nx >= bins || nz >= bins) continue;
+        const ni = nz * bins + nx;
+        if (!visited[ni]) {
+          visited[ni] = 1;
+          queue.push(ni);
+        }
+      }
+    }
+  }
+
+  const inComp = new Set(component);
+  const cxs: number[] = [];
+  const cys: number[] = [];
+  const czs: number[] = [];
+  for (let i = 0; i < xs.length; i++) {
+    const ix = Math.min(bins - 1, Math.floor(((xs[i] - minX) / spanX) * bins));
+    const iz = Math.min(bins - 1, Math.floor(((zs[i] - minZ) / spanZ) * bins));
+    if (!inComp.has(iz * bins + ix)) continue;
+    cxs.push(xs[i]);
+    cys.push(ys[i]);
+    czs.push(zs[i]);
+  }
+
+  if (cxs.length < 32) {
+    const box = new THREE.Box3().setFromObject(root);
+    return { box, sampleCount: xs.length };
+  }
+
+  cxs.sort((a, b) => a - b);
+  cys.sort((a, b) => a - b);
+  czs.sort((a, b) => a - b);
+
+  const box = new THREE.Box3(
+    new THREE.Vector3(percentile(cxs, 0.01), percentile(cys, 0.02), percentile(czs, 0.01)),
+    new THREE.Vector3(percentile(cxs, 0.99), percentile(cys, 0.98), percentile(czs, 0.99)),
+  );
+  return { box, sampleCount: cxs.length };
+}
 
 interface HeightTools {
   getGroundHeight: (x: number, z: number) => number;
   /** Open air (meters) above ground before a ceiling hit; large if open sky */
   probeClearance: (x: number, z: number, groundY: number) => number;
+  /** Material name of the first downward hit (road / mat01 / …) */
+  probeSurfaceMat: (x: number, z: number) => string;
 }
 
 function buildHeightTools(
@@ -203,11 +323,15 @@ function buildHeightTools(
   const filled = new Uint8Array(res * res);
   cache.fill(fallbackY);
 
-  const sampleRaw = (x: number, z: number): number => {
+  const sampleHits = (x: number, z: number) => {
     origin.set(x, rayTop, z);
     raycaster.set(origin, down);
     raycaster.far = rayTop - bounds.min.y + 40;
-    const hits = raycaster.intersectObjects(colliders, false);
+    return raycaster.intersectObjects(colliders, false);
+  };
+
+  const sampleRaw = (x: number, z: number): number => {
+    const hits = sampleHits(x, z);
     if (hits.length > 0) return hits[0].point.y;
     return fallbackY;
   };
@@ -251,7 +375,15 @@ function buildHeightTools(
     return Math.max(0, hits[0].point.y - groundY);
   };
 
-  return { getGroundHeight, probeClearance };
+  const probeSurfaceMat = (x: number, z: number) => {
+    const hits = sampleHits(x, z);
+    if (!hits[0]) return '';
+    const mat = (hits[0].object as THREE.Mesh).material;
+    if (Array.isArray(mat)) return mat[0]?.name || '';
+    return (mat as THREE.Material)?.name || '';
+  };
+
+  return { getGroundHeight, probeClearance, probeSurfaceMat };
 }
 
 export interface OpenSpawn {
@@ -279,6 +411,7 @@ export function findOpenSpawn(
   getGroundHeight: (x: number, z: number) => number,
   mapHalfExtent: number,
   probeClearance?: (x: number, z: number, groundY: number) => number,
+  probeSurfaceMat?: (x: number, z: number) => string,
 ): OpenSpawn {
   const half = mapHalfExtent * SPAWN_SEARCH_FRACTION;
   const n = SPAWN_GRID;
@@ -298,13 +431,16 @@ export function findOpenSpawn(
     for (let ix = 0; ix < n; ix++) {
       const y = getGroundHeight(xs[ix], zs[iz]);
       heights[iz][ix] = y;
-      allY.push(y);
+      // Ignore raycast misses (fallback) when building outdoor percentiles
+      if (Math.abs(y - FALLBACK_GROUND_Y) > 0.05) allY.push(y);
     }
   }
 
   const sortedY = allY.slice().sort((a, b) => a - b);
-  const y30 = percentile(sortedY, 0.3);
-  const y70 = percentile(sortedY, 0.7);
+  // On this map the outdoor yard is the lower plateau of first-hits;
+  // higher samples are rooftops. Keep spawn in that lower band.
+  const yOutdoorMax = percentile(sortedY, 0.22);
+  const yFloor = percentile(sortedY, 0.05);
 
   type Scored = { ix: number; iz: number; y: number; score: number };
   let best: Scored | null = null;
@@ -313,61 +449,83 @@ export function findOpenSpawn(
     for (let ix = 0; ix < n; ix++) {
       const y = heights[iz][ix];
 
-      let neighborSum = 0;
+      // Reject empty space (ray miss) and rooftops / high pads
+      if (Math.abs(y - FALLBACK_GROUND_Y) < 0.05) continue;
+      if (y > yOutdoorMax + 0.5) continue;
+
       let neighborCount = 0;
       let varianceSum = 0;
+      let tallNeighbors = 0;
 
-      for (let dz = -1; dz <= 1; dz++) {
-        for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        for (let dx = -2; dx <= 2; dx++) {
           if (dx === 0 && dz === 0) continue;
           const nix = ix + dx;
           const niz = iz + dz;
           if (nix < 0 || niz < 0 || nix >= n || niz >= n) continue;
           const ny = heights[niz][nix];
-          neighborSum += ny;
-          neighborCount++;
-          const d = ny - y;
-          varianceSum += d * d;
+          if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1) {
+            neighborCount++;
+            const d = ny - y;
+            varianceSum += d * d;
+          }
+          if (ny > y + 5) tallNeighbors++;
         }
       }
 
       const localVariance = neighborCount > 0 ? varianceSum / neighborCount : 0;
 
-      // Prefer mid outdoor band (roads / yards) — hard-penalize pits and roofs
-      let heightScore = 0;
-      if (y >= y30 && y <= y70) {
-        heightScore = 4;
-      } else if (y < y30) {
-        const span = Math.max(0.5, y70 - sortedY[0]);
-        heightScore = -4 * ((y30 - y) / span);
-      } else {
-        const span = Math.max(0.5, sortedY[sortedY.length - 1] - y70);
-        heightScore = -3 * ((y - y70) / span);
-      }
+      // Prefer the lower outdoor band (true yards), not mid roofs that sneak in
+      const bandSpan = Math.max(0.5, yOutdoorMax - yFloor);
+      const heightScore = 6 * (1 - THREE.MathUtils.clamp((y - yFloor) / bandSpan, 0, 1));
 
       const flatScore = 2.5 / (1 + localVariance);
+      const openYardScore = -1.2 * tallNeighbors;
 
-      // Clearance: meters of open air above ground before next hit
       let clearScore = 1;
       if (probeClearance) {
         const clear = probeClearance(xs[ix], zs[iz], y);
         if (clear < SPAWN_CLEARANCE) {
-          clearScore = -8 + (clear / SPAWN_CLEARANCE) * 2;
+          clearScore = -12;
         } else {
-          clearScore = 5 + Math.min(4, (clear - SPAWN_CLEARANCE) * 0.05);
+          clearScore = 7 + Math.min(4, (clear - SPAWN_CLEARANCE) * 0.03);
         }
       }
 
-      // Slight preference for map center (better overview of the base)
       const cx = xs[ix] / Math.max(1, half);
       const cz = zs[iz] / Math.max(1, half);
-      const centerScore = 1.5 * (1 - Math.min(1, Math.hypot(cx, cz)));
+      const centerScore = 1.4 * (1 - Math.min(1, Math.hypot(cx, cz)));
 
-      const score = heightScore + flatScore + clearScore + centerScore;
+      let matScore = 0;
+      if (probeSurfaceMat) {
+        const matName = probeSurfaceMat(xs[ix], zs[iz]).toLowerCase();
+        if (matName.includes('road')) matScore = 8;
+        else if (matName.includes('mat01')) matScore = 2;
+        else if (matName.includes('mat0')) matScore = 0;
+        else if (matName.includes('fence') || matName.includes('water')) matScore = -4;
+      }
+
+      const score =
+        heightScore + flatScore + clearScore + centerScore + openYardScore + matScore;
       if (!best || score > best.score) {
         best = { ix, iz, y, score };
       }
     }
+  }
+
+  // Fallback: if every sample was rejected as rooftop, pick the lowest clear cell
+  if (!best) {
+    let lowest: Scored | null = null;
+    for (let iz = 0; iz < n; iz++) {
+      for (let ix = 0; ix < n; ix++) {
+        const y = heights[iz][ix];
+        if (Math.abs(y - FALLBACK_GROUND_Y) < 0.05) continue;
+        const clear = probeClearance ? probeClearance(xs[ix], zs[iz], y) : 999;
+        if (clear < SPAWN_CLEARANCE) continue;
+        if (!lowest || y < lowest.y) lowest = { ix, iz, y, score: 0 };
+      }
+    }
+    best = lowest;
   }
 
   const pick = best ?? { ix: Math.floor(n / 2), iz: Math.floor(n / 2), y: FALLBACK_GROUND_Y, score: 0 };
@@ -413,19 +571,21 @@ export async function loadMapWorld(
   const mapRoot = gltf.scene;
   mapRoot.name = 'fruzerPolygon';
 
-  // Measure raw bounds, then center in local space and scale via a wrapper
-  // so translation is not left unscaled (Three applies T*R*S).
+  // Sketchfab export includes sparse outlier verts (water / distant props)
+  // that inflate AABB. Center + scale from a robust percentile box so the
+  // dense battle-royale base fills the play area.
   mapRoot.updateMatrixWorld(true);
-  const rawBox = new THREE.Box3().setFromObject(mapRoot);
+  const robust = computeRobustBounds(mapRoot);
   const rawSize = new THREE.Vector3();
-  const rawCenter = new THREE.Vector3();
-  rawBox.getSize(rawSize);
-  rawBox.getCenter(rawCenter);
+  robust.box.getSize(rawSize);
+  const rawCenter = robust.box.getCenter(new THREE.Vector3());
 
   const horiz = Math.max(rawSize.x, rawSize.z, 1);
   const scale = MAP_TARGET_SIZE / horiz;
 
-  mapRoot.position.set(-rawCenter.x, -rawBox.min.y, -rawCenter.z);
+  // Sit the robust floor on y=0 (not the absolute AABB min, which may be
+  // a deep outlier pit).
+  mapRoot.position.set(-rawCenter.x, -robust.box.min.y, -rawCenter.z);
 
   const mapScaled = new THREE.Group();
   mapScaled.name = 'fruzerPolygonScaled';
@@ -433,52 +593,93 @@ export async function loadMapWorld(
   mapScaled.add(mapRoot);
   mapScaled.updateMatrixWorld(true);
 
+  console.info('[map] robust bounds', {
+    size: rawSize.toArray().map((n) => +n.toFixed(1)),
+    center: rawCenter.toArray().map((n) => +n.toFixed(1)),
+    scale: +scale.toFixed(5),
+    samples: robust.sampleCount,
+  });
+
   const colliders: THREE.Mesh[] = [];
   mapScaled.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
-    // Avoid self-shadow crush on mobile / software GL; still receive shadows
+    // Flat unlit look matches Sketchfab / Chicken Gun; avoid PBR muddying
     mesh.castShadow = false;
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = false;
     if (mesh.material) {
       const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const next: THREE.Material[] = [];
       for (const m of mats) {
-        const std = m as THREE.MeshStandardMaterial;
-        if (std.map) {
-          std.map.colorSpace = THREE.SRGBColorSpace;
-          // Sketchfab albedo lives on TEXCOORD_1 in the source; GLB was
-          // rewritten so TEXCOORD_0 holds those UVs. Keep channel 0.
-          std.map.channel = 0;
+        const src = m as THREE.MeshStandardMaterial;
+        const map = src.map;
+        if (map) {
+          map.colorSpace = THREE.SRGBColorSpace;
+          map.channel = 0;
+          // Palette atlases sample tiny color swatches — bilinear blur
+          // turns them into muddy brown. Keep crisp nearest filtering.
+          map.magFilter = THREE.NearestFilter;
+          map.minFilter = THREE.NearestFilter;
+          map.generateMipmaps = false;
+          map.needsUpdate = true;
         }
-        if ('emissiveMap' in std && std.emissiveMap) {
-          std.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+        const name = src.name || '';
+        const isFence = /fence/i.test(name);
+        const isWater = /water/i.test(name);
+        const basic = new THREE.MeshBasicMaterial({
+          map: map ?? null,
+          color: src.color?.clone?.() ?? new THREE.Color(0xffffff),
+          transparent: src.transparent || isWater,
+          opacity: src.opacity ?? 1,
+          alphaTest: src.alphaTest > 0 ? src.alphaTest : isFence ? 0.5 : 0,
+          side: isFence || isWater ? THREE.DoubleSide : (src.side ?? THREE.FrontSide),
+          depthWrite: isWater ? false : src.depthWrite !== false,
+        });
+        basic.name = name;
+        if (isWater) {
+          basic.opacity = Math.min(basic.opacity, 0.85);
         }
-        if ('metalness' in std) std.metalness = 0;
-        if ('roughness' in std) std.roughness = 0.85;
-        // Unlit-ish boost: keep albedo readable under sunset lighting
-        if ('envMapIntensity' in std) std.envMapIntensity = 0;
-        std.needsUpdate = true;
+        src.dispose?.();
+        next.push(basic);
       }
+      mesh.material = next.length === 1 ? next[0] : next;
     }
     colliders.push(mesh);
   });
 
   group.add(mapScaled);
 
-  const bounds = new THREE.Box3().setFromObject(mapScaled);
+  // Play bounds from the robust box (scaled), not the outlier-inflated AABB
+  const bounds = new THREE.Box3(
+    new THREE.Vector3(
+      (robust.box.min.x - rawCenter.x) * scale,
+      0,
+      (robust.box.min.z - rawCenter.z) * scale,
+    ),
+    new THREE.Vector3(
+      (robust.box.max.x - rawCenter.x) * scale,
+      (robust.box.max.y - robust.box.min.y) * scale,
+      (robust.box.max.z - rawCenter.z) * scale,
+    ),
+  );
   const size = new THREE.Vector3();
   bounds.getSize(size);
   const mapHalfExtent = Math.max(size.x, size.z) * 0.5;
   // Map ready: scaled into play area with raycast height sampling
 
-  const { getGroundHeight, probeClearance } = buildHeightTools(
+  const { getGroundHeight, probeClearance, probeSurfaceMat } = buildHeightTools(
     colliders,
     bounds,
     FALLBACK_GROUND_Y,
   );
 
   // Prefer open outdoor ground with clear sky (avoid hangar pits / under-roofs)
-  const open = findOpenSpawn(getGroundHeight, mapHalfExtent, probeClearance);
+  const open = findOpenSpawn(
+    getGroundHeight,
+    mapHalfExtent,
+    probeClearance,
+    probeSurfaceMat,
+  );
   const spawnPosition = new THREE.Vector3(open.x, open.groundY + SPAWN_HOVER, open.z);
   console.info('[map] spawn', {
     x: open.x,

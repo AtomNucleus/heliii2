@@ -63,8 +63,8 @@ export class HelicopterController {
   private worldBound = 105;
   private maxAltitude = 200;
 
-  // Pull back for Fruzer-scale base so the pad / roads read in frame
-  private camOffset = new THREE.Vector3(0, 10, 28);
+  // Pull back for Fruzer-scale base so hangars / yards read in frame
+  private camOffset = new THREE.Vector3(0, 22, 55);
   private camLook = new THREE.Vector3();
   private camPos = new THREE.Vector3();
   private camSmooth = new THREE.Vector3();

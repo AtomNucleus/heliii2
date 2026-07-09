@@ -2,11 +2,11 @@
 
 ## Live site (public, no password)
 
-**https://melodious-hamster-4cfdfd.netlify.app**
+**https://flourishing-cactus-903a36.netlify.app**
 
-Fruzer Polygon map build. Deployed with `--allow-anonymous --created-via cli` (no drop password).
+Fruzer Polygon map build (density-cluster framing, unlit nearest materials, outdoor spawn). Deployed with `--allow-anonymous --created-via cli` (no drop password).
 
-- Site ID: `c1e39821-32dd-4f15-8ea6-79889f137cab`
+- Site ID: `1e50b314-13eb-4377-8aa6-37474d6f573a`
 
 ### Claim into your Netlify account (recommended)
 
@@ -15,9 +15,9 @@ Anonymous sites can be suspended if left unclaimed. Claim within ~1 hour:
 1. Log in: `netlify login`
 2. Run:
    ```bash
-   netlify claim --site c1e39821-32dd-4f15-8ea6-79889f137cab --token eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzQ5NTMsImV4cCI6MTc4MzU3ODU1MywiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJkNmJmNDQxNy0xMDdkLTQzZmItYjk3Mi1kMzQ1MjI0OWYxNGQifQ.3-qJlSGJVYlaTSR9VMxX8Qip2BZqKW3TxBDWU5IIlwE
+   netlify claim --site 1e50b314-13eb-4377-8aa6-37474d6f573a --token eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzcwNjQsImV4cCI6MTc4MzU4MDY2NCwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiI2MWU1YjNjMy0yNTg5LTQ1NmMtOTY3NC1mMTYxNGUwOTZkMzEifQ.Xa8WwWAl0MnbnRg1y5W6EKnBVs79F7zBiLNmXBE2NrE
    ```
-3. Or open: https://app.netlify.com/drop/melodious-hamster-4cfdfd#drop_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzQ5NTMsImV4cCI6MTc4MzU3ODU1MywiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJkNmJmNDQxNy0xMDdkLTQzZmItYjk3Mi1kMzQ1MjI0OWYxNGQifQ.3-qJlSGJVYlaTSR9VMxX8Qip2BZqKW3TxBDWU5IIlwE
+3. Or open: https://app.netlify.com/drop/flourishing-cactus-903a36#drop_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM1NzcwNjQsImV4cCI6MTc4MzU4MDY2NCwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiI2MWU1YjNjMy0yNTg5LTQ1NmMtOTY3NC1mMTYxNGUwOTZkMzEifQ.Xa8WwWAl0MnbnRg1y5W6EKnBVs79F7zBiLNmXBE2NrE
 
 ### Redeploy (public, no password)
 

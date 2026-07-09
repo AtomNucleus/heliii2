@@ -15,9 +15,9 @@ export function createPostProcessing(
 
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.28, // strength — avoid crushing terrain on software GL
-    0.4, // radius
-    0.85, // threshold — only bright emissives bloom
+    0.18, // strength — keep Fruzer albedo readable
+    0.35, // radius
+    0.92, // threshold — only bright emissives / exhaust bloom
   );
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
