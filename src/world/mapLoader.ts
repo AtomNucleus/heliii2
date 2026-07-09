@@ -167,13 +167,28 @@ function createLandingPad(): THREE.Group {
   return pad;
 }
 
-function buildHeightSampler(
+const SPAWN_GRID = 17;
+/** Central fraction of mapHalfExtent used for spawn search */
+const SPAWN_SEARCH_FRACTION = 0.45;
+/** Clear air required above ground so we don't spawn inside hangars */
+const SPAWN_CLEARANCE = 28;
+/** Hover height above chosen ground */
+export const SPAWN_HOVER = 22;
+
+interface HeightTools {
+  getGroundHeight: (x: number, z: number) => number;
+  /** Open air (meters) above ground before a ceiling hit; large if open sky */
+  probeClearance: (x: number, z: number, groundY: number) => number;
+}
+
+function buildHeightTools(
   colliders: THREE.Object3D[],
   bounds: THREE.Box3,
   fallbackY: number,
-): (x: number, z: number) => number {
+): HeightTools {
   const raycaster = new THREE.Raycaster();
   const down = new THREE.Vector3(0, -1, 0);
+  const up = new THREE.Vector3(0, 1, 0);
   const origin = new THREE.Vector3();
   const res = HEIGHT_GRID_RES;
   const minX = bounds.min.x;
@@ -210,7 +225,7 @@ function buildHeightSampler(
     }
   }
 
-  return (x: number, z: number) => {
+  const getGroundHeight = (x: number, z: number) => {
     const fx = THREE.MathUtils.clamp((x - minX) / spanX, 0, 0.9999);
     const fz = THREE.MathUtils.clamp((z - minZ) / spanZ, 0, 0.9999);
     const ix = Math.floor(fx * res);
@@ -224,11 +239,20 @@ function buildHeightSampler(
     }
     return cache[idx];
   };
-}
 
-const SPAWN_GRID = 15;
-/** Central fraction of mapHalfExtent used for spawn search */
-const SPAWN_SEARCH_FRACTION = 0.55;
+  const probeClearance = (x: number, z: number, groundY: number) => {
+    // Cast upward from just above the surface — hangar roofs / overhangs
+    // register as a nearby ceiling; open yards return a large value.
+    origin.set(x, groundY + 0.75, z);
+    raycaster.set(origin, up);
+    raycaster.far = Math.max(SPAWN_CLEARANCE + 80, rayTop - groundY);
+    const hits = raycaster.intersectObjects(colliders, false);
+    if (hits.length === 0) return 999;
+    return Math.max(0, hits[0].point.y - groundY);
+  };
+
+  return { getGroundHeight, probeClearance };
+}
 
 export interface OpenSpawn {
   x: number;
@@ -247,13 +271,14 @@ function percentile(sorted: number[], p: number): number {
 }
 
 /**
- * Sample a wide grid over the central ~55% of the map and score open ground:
- * prefer local minima (plazas, not rooftops), mid-percentile heights
- * (avoid deepest pits and high roofs), and flat neighborhoods.
+ * Sample a grid over the central map and score open outdoor ground:
+ * prefer mid-band heights (roads / plazas), flat neighborhoods, and
+ * clear sky above (reject hangar pits / under-roof hits).
  */
 export function findOpenSpawn(
   getGroundHeight: (x: number, z: number) => number,
   mapHalfExtent: number,
+  probeClearance?: (x: number, z: number, groundY: number) => number,
 ): OpenSpawn {
   const half = mapHalfExtent * SPAWN_SEARCH_FRACTION;
   const n = SPAWN_GRID;
@@ -278,8 +303,8 @@ export function findOpenSpawn(
   }
 
   const sortedY = allY.slice().sort((a, b) => a - b);
-  const y25 = percentile(sortedY, 0.25);
-  const y55 = percentile(sortedY, 0.55);
+  const y30 = percentile(sortedY, 0.3);
+  const y70 = percentile(sortedY, 0.7);
 
   type Scored = { ix: number; iz: number; y: number; score: number };
   let best: Scored | null = null;
@@ -288,7 +313,6 @@ export function findOpenSpawn(
     for (let ix = 0; ix < n; ix++) {
       const y = heights[iz][ix];
 
-      let localMin = true;
       let neighborSum = 0;
       let neighborCount = 0;
       let varianceSum = 0;
@@ -300,7 +324,6 @@ export function findOpenSpawn(
           const niz = iz + dz;
           if (nix < 0 || niz < 0 || nix >= n || niz >= n) continue;
           const ny = heights[niz][nix];
-          if (ny < y - 0.05) localMin = false;
           neighborSum += ny;
           neighborCount++;
           const d = ny - y;
@@ -309,26 +332,38 @@ export function findOpenSpawn(
       }
 
       const localVariance = neighborCount > 0 ? varianceSum / neighborCount : 0;
-      const meanNeighbor = neighborCount > 0 ? neighborSum / neighborCount : y;
 
-      // Prefer mid-band heights (25th–55th percentile)
+      // Prefer mid outdoor band (roads / yards) — hard-penalize pits and roofs
       let heightScore = 0;
-      if (y >= y25 && y <= y55) {
-        heightScore = 3;
-      } else if (y < y25) {
-        // Deep pits — soft penalty proportional to how far below band
-        const span = Math.max(0.5, y55 - sortedY[0]);
-        heightScore = -2 * ((y25 - y) / span);
+      if (y >= y30 && y <= y70) {
+        heightScore = 4;
+      } else if (y < y30) {
+        const span = Math.max(0.5, y70 - sortedY[0]);
+        heightScore = -4 * ((y30 - y) / span);
       } else {
-        // Rooftops / high ground
-        const span = Math.max(0.5, sortedY[sortedY.length - 1] - y55);
-        heightScore = -2.5 * ((y - y55) / span);
+        const span = Math.max(0.5, sortedY[sortedY.length - 1] - y70);
+        heightScore = -3 * ((y - y70) / span);
       }
 
-      const localMinScore = localMin ? 2.5 : y <= meanNeighbor + 0.15 ? 0.5 : -1.5;
-      const flatScore = 1.5 / (1 + localVariance);
+      const flatScore = 2.5 / (1 + localVariance);
 
-      const score = heightScore + localMinScore + flatScore;
+      // Clearance: meters of open air above ground before next hit
+      let clearScore = 1;
+      if (probeClearance) {
+        const clear = probeClearance(xs[ix], zs[iz], y);
+        if (clear < SPAWN_CLEARANCE) {
+          clearScore = -8 + (clear / SPAWN_CLEARANCE) * 2;
+        } else {
+          clearScore = 5 + Math.min(4, (clear - SPAWN_CLEARANCE) * 0.05);
+        }
+      }
+
+      // Slight preference for map center (better overview of the base)
+      const cx = xs[ix] / Math.max(1, half);
+      const cz = zs[iz] / Math.max(1, half);
+      const centerScore = 1.5 * (1 - Math.min(1, Math.hypot(cx, cz)));
+
+      const score = heightScore + flatScore + clearScore + centerScore;
       if (!best || score > best.score) {
         best = { ix, iz, y, score };
       }
@@ -409,12 +444,19 @@ export async function loadMapWorld(
       const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       for (const m of mats) {
         const std = m as THREE.MeshStandardMaterial;
-        if (std.map) std.map.colorSpace = THREE.SRGBColorSpace;
+        if (std.map) {
+          std.map.colorSpace = THREE.SRGBColorSpace;
+          // Sketchfab albedo lives on TEXCOORD_1 in the source; GLB was
+          // rewritten so TEXCOORD_0 holds those UVs. Keep channel 0.
+          std.map.channel = 0;
+        }
         if ('emissiveMap' in std && std.emissiveMap) {
           std.emissiveMap.colorSpace = THREE.SRGBColorSpace;
         }
         if ('metalness' in std) std.metalness = 0;
-        if ('roughness' in std) std.roughness = 0.9;
+        if ('roughness' in std) std.roughness = 0.85;
+        // Unlit-ish boost: keep albedo readable under sunset lighting
+        if ('envMapIntensity' in std) std.envMapIntensity = 0;
         std.needsUpdate = true;
       }
     }
@@ -429,16 +471,21 @@ export async function loadMapWorld(
   const mapHalfExtent = Math.max(size.x, size.z) * 0.5;
   // Map ready: scaled into play area with raycast height sampling
 
-  const getGroundHeight = buildHeightSampler(colliders, bounds, FALLBACK_GROUND_Y);
+  const { getGroundHeight, probeClearance } = buildHeightTools(
+    colliders,
+    bounds,
+    FALLBACK_GROUND_Y,
+  );
 
-  // Prefer open-ground local minima in the central map (avoid rooftops / pits)
-  const open = findOpenSpawn(getGroundHeight, mapHalfExtent);
-  const spawnPosition = new THREE.Vector3(open.x, open.groundY + 18, open.z);
+  // Prefer open outdoor ground with clear sky (avoid hangar pits / under-roofs)
+  const open = findOpenSpawn(getGroundHeight, mapHalfExtent, probeClearance);
+  const spawnPosition = new THREE.Vector3(open.x, open.groundY + SPAWN_HOVER, open.z);
   console.info('[map] spawn', {
     x: open.x,
     z: open.z,
     groundY: open.groundY,
     heliY: spawnPosition.y,
+    clearance: probeClearance(open.x, open.z, open.groundY),
   });
 
   const landingPad = createLandingPad();
@@ -484,7 +531,7 @@ export function buildFigureEightRingLayout(
     const z = (a * s * c) / denom;
     const ground = getGroundHeight(x, z);
     // Keep rings well above dirt pits / hangar floors on large Fruzer scale
-    const alt = 14 + (i % 3) * 5 + Math.sin(i * 1.3) * 4;
+    const alt = 20 + (i % 3) * 6 + Math.sin(i * 1.3) * 4;
     layout.push([x, ground + alt, z]);
   }
 

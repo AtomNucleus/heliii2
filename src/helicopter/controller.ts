@@ -63,7 +63,8 @@ export class HelicopterController {
   private worldBound = 105;
   private maxAltitude = 200;
 
-  private camOffset = new THREE.Vector3(0, 5.5, 14);
+  // Pull back for Fruzer-scale base so the pad / roads read in frame
+  private camOffset = new THREE.Vector3(0, 10, 28);
   private camLook = new THREE.Vector3();
   private camPos = new THREE.Vector3();
   private camSmooth = new THREE.Vector3();
@@ -168,7 +169,7 @@ export class HelicopterController {
     resetInputState(this.keyboardInput);
     resetInputState(this.touchInput);
     this.syncInput();
-    this.camSmooth.copy(spawn).add(new THREE.Vector3(0, 6, 16));
+    this.camSmooth.copy(spawn).add(new THREE.Vector3(0, this.camOffset.y, this.camOffset.z));
     this.lookSmooth.copy(spawn);
     this.camera.position.copy(this.camSmooth);
     this.camera.lookAt(this.lookSmooth);

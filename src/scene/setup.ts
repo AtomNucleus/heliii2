@@ -29,8 +29,8 @@ export const COLORS = {
 export function createSceneSetup(canvas: HTMLCanvasElement) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(COLORS.skyTop);
-  // Light fog so textured Fruzer Polygon materials stay readable at distance
-  scene.fog = new THREE.FogExp2(COLORS.fog, 0.0015);
+  // Very light fog — Fruzer textures need distance readability
+  scene.fog = new THREE.FogExp2(COLORS.fog, 0.0009);
 
   const camera = new THREE.PerspectiveCamera(
     60,
@@ -49,7 +49,7 @@ export function createSceneSetup(canvas: HTMLCanvasElement) {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   // Higher exposure so textured BR materials aren't crushed by ACES / soft GL
-  renderer.toneMappingExposure = 1.45;
+  renderer.toneMappingExposure = 1.55;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
