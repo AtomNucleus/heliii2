@@ -1,4 +1,26 @@
 import * as THREE from 'three';
+import {
+  FLIGHT,
+  createAxes,
+  createBoostState,
+  dampAxes,
+  updateBoost,
+  integrateVelocity,
+  computeAttitudeTargets,
+  yawRate,
+  resolveGroundImpact,
+  applySoftBounds,
+  type FlightAxes,
+  type BoostState,
+} from './flightDynamics';
+import {
+  createChaseCameraState,
+  resetChaseCamera,
+  updateChaseCamera,
+  triggerCameraShake,
+  getShakeTrauma,
+  type ChaseCameraState,
+} from './chaseCamera';
 
 export interface InputState {
   forward: boolean;
@@ -7,7 +29,21 @@ export interface InputState {
   right: boolean;
   up: boolean;
   down: boolean;
+  /** Hold E / Q / mobile BOOST for afterburner + evasive bank */
+  boost: boolean;
 }
+
+/** Optional analog overrides for touch (and future gamepad). */
+export interface AnalogAxes {
+  /** -1 left … +1 right */
+  steerX?: number;
+  /** -1 back … +1 forward */
+  steerY?: number;
+  /** -1 descend … +1 ascend */
+  lift?: number;
+}
+
+export type TouchInputPayload = Partial<InputState> & AnalogAxes;
 
 export interface FlightState {
   position: THREE.Vector3;
@@ -18,6 +54,12 @@ export interface FlightState {
   speed: number;
 }
 
+export interface DamageState {
+  health: number;
+  lastImpact: number;
+  totalDamage: number;
+}
+
 function createInputState(): InputState {
   return {
     forward: false,
@@ -26,6 +68,7 @@ function createInputState(): InputState {
     right: false,
     up: false,
     down: false,
+    boost: false,
   };
 }
 
@@ -36,11 +79,13 @@ function resetInputState(input: InputState) {
   input.right = false;
   input.up = false;
   input.down = false;
+  input.boost = false;
 }
 
 /**
  * Arcade helicopter controller: WASD / arrows + Space/Shift,
- * soft banking, chase camera, soft ground collision.
+ * E/Q boost, soft banking, dynamic chase camera, hover assist,
+ * soft ground collision with damage/shake hooks, soft world bounds.
  */
 export class HelicopterController {
   readonly heli: THREE.Group;
@@ -54,25 +99,24 @@ export class HelicopterController {
   private getGroundHeight: (x: number, z: number) => number;
   private readonly keyboardInput = createInputState();
   private readonly touchInput = createInputState();
-
-  private readonly maxSpeed = 55;
-  private readonly accel = 28;
-  private readonly verticalAccel = 38;
-  private readonly drag = 1.8;
-  private readonly turnSpeed = 2.2;
+  private readonly touchAnalog: AnalogAxes = {};
+  private readonly axes = createAxes();
+  private readonly targetAxes = createAxes();
+  private readonly boost: BoostState = createBoostState();
+  private evasiveTimer = 0;
+  private evasiveSide = 0;
+  private camState: ChaseCameraState;
+  private damage: DamageState = { health: 100, lastImpact: 0, totalDamage: 0 };
   private worldBound = 105;
   private maxAltitude = 200;
-
-  // Pull back for Fruzer-scale base so hangars / yards read in frame
-  private camOffset = new THREE.Vector3(0, 14, 36);
-  private camLook = new THREE.Vector3();
-  private camPos = new THREE.Vector3();
-  private camSmooth = new THREE.Vector3();
-  private lookSmooth = new THREE.Vector3();
+  private boundPressure = 0;
 
   private mainRotor: THREE.Object3D | null = null;
   private tailRotor: THREE.Object3D | null = null;
   private rotorBlur: THREE.Mesh | null = null;
+
+  /** Optional listener for impact events (intensity 0..1, damage dealt). */
+  onImpact: ((intensity: number, damage: number) => void) | null = null;
 
   enabled = false;
 
@@ -84,6 +128,7 @@ export class HelicopterController {
     this.heli = heli;
     this.camera = camera;
     this.getGroundHeight = getGroundHeight;
+    this.camState = createChaseCameraState(heli.position);
 
     this.mainRotor = heli.getObjectByName('mainRotor') ?? null;
     this.tailRotor = heli.getObjectByName('tailRotor') ?? null;
@@ -118,12 +163,18 @@ export class HelicopterController {
         case 'ShiftRight':
           this.keyboardInput.down = pressed;
           break;
+        case 'KeyE':
+        case 'KeyQ':
+          this.keyboardInput.boost = pressed;
+          break;
       }
       this.syncInput();
     };
 
     window.addEventListener('keydown', (e) => {
-      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+      if (
+        ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)
+      ) {
         e.preventDefault();
       }
       setKey(e.code, true);
@@ -131,13 +182,20 @@ export class HelicopterController {
     window.addEventListener('keyup', (e) => setKey(e.code, false));
   }
 
-  setTouchInput(nextInput: Partial<InputState>) {
-    Object.assign(this.touchInput, nextInput);
+  setTouchInput(nextInput: TouchInputPayload) {
+    const { steerX, steerY, lift, ...buttons } = nextInput;
+    Object.assign(this.touchInput, buttons);
+    if (steerX !== undefined) this.touchAnalog.steerX = steerX;
+    if (steerY !== undefined) this.touchAnalog.steerY = steerY;
+    if (lift !== undefined) this.touchAnalog.lift = lift;
     this.syncInput();
   }
 
   clearTouchInput() {
     resetInputState(this.touchInput);
+    delete this.touchAnalog.steerX;
+    delete this.touchAnalog.steerY;
+    delete this.touchAnalog.lift;
     this.syncInput();
   }
 
@@ -148,6 +206,7 @@ export class HelicopterController {
     this.input.right = this.keyboardInput.right || this.touchInput.right;
     this.input.up = this.keyboardInput.up || this.touchInput.up;
     this.input.down = this.keyboardInput.down || this.touchInput.down;
+    this.input.boost = this.keyboardInput.boost || this.touchInput.boost;
   }
 
   /** Soft clamp half-extent for XZ (map-dependent) */
@@ -168,11 +227,22 @@ export class HelicopterController {
     this.heli.rotation.set(0, 0, 0);
     resetInputState(this.keyboardInput);
     resetInputState(this.touchInput);
+    delete this.touchAnalog.steerX;
+    delete this.touchAnalog.steerY;
+    delete this.touchAnalog.lift;
     this.syncInput();
-    this.camSmooth.copy(spawn).add(new THREE.Vector3(0, this.camOffset.y, this.camOffset.z));
-    this.lookSmooth.copy(spawn);
-    this.camera.position.copy(this.camSmooth);
-    this.camera.lookAt(this.lookSmooth);
+    Object.assign(this.axes, createAxes());
+    Object.assign(this.targetAxes, createAxes());
+    Object.assign(this.boost, createBoostState());
+    this.evasiveTimer = 0;
+    this.evasiveSide = 0;
+    this.boundPressure = 0;
+    this.damage = { health: 100, lastImpact: 0, totalDamage: 0 };
+    resetChaseCamera(this.camState, spawn);
+    this.camera.fov = this.camState.currentFov;
+    this.camera.updateProjectionMatrix();
+    this.camera.position.copy(this.camState.camSmooth);
+    this.camera.lookAt(this.camState.lookSmooth);
   }
 
   getSpeed(): number {
@@ -195,15 +265,77 @@ export class HelicopterController {
     };
   }
 
+  isBoosting(): boolean {
+    return this.boost.active;
+  }
+
+  getBoostTimer(): number {
+    return this.boost.timer;
+  }
+
+  getBoostCooldown(): number {
+    return this.boost.cooldown;
+  }
+
+  getHealth(): number {
+    return this.damage.health;
+  }
+
+  getDamageState(): DamageState {
+    return { ...this.damage };
+  }
+
+  /** Current camera shake trauma 0..1 (for HUD / VFX hooks). */
+  getCameraShake(): number {
+    return getShakeTrauma(this.camState);
+  }
+
+  /** Soft world-edge / ceiling pressure 0..1 (for VFX / audio hooks). */
+  getBoundPressure(): number {
+    return this.boundPressure;
+  }
+
+  /** Inject shake from external events (ring scrape, explosions, etc.). */
+  addCameraShake(intensity: number) {
+    triggerCameraShake(this.camState, intensity);
+  }
+
+  private buildTargetAxes(): FlightAxes {
+    const a = this.targetAxes;
+
+    if (this.touchAnalog.steerY !== undefined) {
+      a.throttle = THREE.MathUtils.clamp(this.touchAnalog.steerY, -1, 1);
+    } else {
+      a.throttle = (this.input.forward ? 1 : 0) + (this.input.back ? -1 : 0);
+    }
+
+    if (this.touchAnalog.steerX !== undefined) {
+      a.turn = THREE.MathUtils.clamp(this.touchAnalog.steerX, -1, 1);
+    } else {
+      a.turn = (this.input.right ? 1 : 0) + (this.input.left ? -1 : 0);
+    }
+
+    if (this.touchAnalog.lift !== undefined) {
+      a.lift = THREE.MathUtils.clamp(this.touchAnalog.lift, -1, 1);
+    } else {
+      a.lift = (this.input.up ? 1 : 0) + (this.input.down ? -1 : 0);
+    }
+
+    a.boost = this.input.boost ? 1 : 0;
+    return a;
+  }
+
   update(dt: number) {
     // Rotor animation always runs for visual life.
-    // Main rotor: spin about Y (blades in XZ). Tail: spin about X (blades in YZ).
-    const rotorSpeed = 28 + this.getSpeed() * 0.4;
+    const rotorSpeed = 28 + this.getSpeed() * 0.4 + (this.boost.active ? 12 : 0);
     if (this.mainRotor) this.mainRotor.rotation.y += rotorSpeed * dt;
     if (this.tailRotor) this.tailRotor.rotation.x += rotorSpeed * 1.6 * dt;
     if (this.rotorBlur) {
       const mat = this.rotorBlur.material as THREE.MeshBasicMaterial;
-      mat.opacity = 0.2 + Math.min(0.25, this.getSpeed() / this.maxSpeed * 0.25);
+      const blurBoost = this.boost.active ? 0.12 : 0;
+      mat.opacity =
+        0.2 +
+        Math.min(0.35, (this.getSpeed() / FLIGHT.maxSpeed) * 0.25 + blurBoost);
     }
 
     if (!this.enabled) {
@@ -211,61 +343,93 @@ export class HelicopterController {
       return;
     }
 
-    // Yaw
-    if (this.input.left) this.yaw += this.turnSpeed * dt;
-    if (this.input.right) this.yaw -= this.turnSpeed * dt;
+    this.buildTargetAxes();
+    dampAxes(this.axes, this.targetAxes, dt, 11);
 
-    // Forward thrust in facing direction
-    const forward = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
-    const accel = new THREE.Vector3();
-
-    if (this.input.forward) accel.addScaledVector(forward, this.accel);
-    if (this.input.back) accel.addScaledVector(forward, -this.accel * 0.65);
-    if (this.input.up) accel.y += this.verticalAccel;
-    if (this.input.down) accel.y -= this.verticalAccel;
-
-    // Light gravity / hover bias — skip while climbing so Space actually lifts
-    if (!this.input.up && !this.input.down) {
-      accel.y -= 4;
+    updateBoost(this.boost, this.axes.boost, this.axes.turn, dt);
+    if (this.boost.justActivated) {
+      triggerCameraShake(this.camState, 0.26 + Math.abs(this.boost.evasiveSide) * 0.18);
+      if (this.boost.evasiveSide !== 0) {
+        this.evasiveSide = this.boost.evasiveSide;
+        this.evasiveTimer = 0.2;
+        this.yaw += -this.boost.evasiveSide * FLIGHT.evasiveYawKick * 0.08;
+      }
     }
 
-    this.velocity.addScaledVector(accel, dt);
-
-    // Drag (lighter vertical so climb works on large maps)
-    this.velocity.x *= Math.exp(-this.drag * dt);
-    this.velocity.z *= Math.exp(-this.drag * dt);
-    this.velocity.y *= Math.exp(-0.75 * dt);
-
-    // Clamp speed
-    const horiz = new THREE.Vector2(this.velocity.x, this.velocity.z);
-    if (horiz.length() > this.maxSpeed) {
-      horiz.setLength(this.maxSpeed);
-      this.velocity.x = horiz.x;
-      this.velocity.z = horiz.y;
+    let evasive = 0;
+    if (this.evasiveTimer > 0) {
+      this.evasiveTimer -= dt;
+      evasive = this.evasiveSide;
+      if (this.evasiveTimer <= 0) {
+        this.evasiveSide = 0;
+        evasive = 0;
+      }
     }
-    this.velocity.y = THREE.MathUtils.clamp(this.velocity.y, -28, 32);
+
+    const ground = this.getGroundHeight(this.heli.position.x, this.heli.position.z);
+    const clearance = Math.max(0, this.heli.position.y - ground);
+
+    const speed = this.getSpeed();
+    this.yaw += yawRate(this.axes, speed, this.boost.active) * dt;
+
+    integrateVelocity(
+      this.velocity,
+      this.yaw,
+      this.axes,
+      this.boost.active,
+      evasive,
+      dt,
+      clearance,
+    );
 
     this.heli.position.addScaledVector(this.velocity, dt);
 
-    // Soft ground collision
-    const ground = this.getGroundHeight(this.heli.position.x, this.heli.position.z);
-    const minY = ground + 2.0;
-    if (this.heli.position.y < minY) {
-      this.heli.position.y = minY;
-      if (this.velocity.y < 0) this.velocity.y *= -0.2;
+    // Soft ground collision + damage/shake hooks
+    const impact = resolveGroundImpact(this.heli.position, this.velocity, ground, 2.0);
+    if (impact.intensity > 0.02) {
+      triggerCameraShake(this.camState, impact.intensity * 0.85);
+      if (impact.damage > 0) {
+        this.damage.health = Math.max(0, this.damage.health - impact.damage);
+        this.damage.lastImpact = impact.intensity;
+        this.damage.totalDamage += impact.damage;
+        this.onImpact?.(impact.intensity, impact.damage);
+      }
+    } else {
+      this.damage.lastImpact = Math.max(0, this.damage.lastImpact - dt * 2);
     }
 
-    // World bounds soft clamp
-    const bound = this.worldBound;
-    this.heli.position.x = THREE.MathUtils.clamp(this.heli.position.x, -bound, bound);
-    this.heli.position.z = THREE.MathUtils.clamp(this.heli.position.z, -bound, bound);
-    this.heli.position.y = Math.min(this.heli.position.y, this.maxAltitude);
+    // Soft world bounds + altitude ceiling
+    const bounds = applySoftBounds(
+      this.heli.position,
+      this.velocity,
+      this.worldBound,
+      this.maxAltitude,
+      dt,
+    );
+    this.boundPressure = THREE.MathUtils.damp(this.boundPressure, bounds.pressure, 8, dt);
+    if (bounds.pressure > 0.55) {
+      triggerCameraShake(this.camState, (bounds.pressure - 0.55) * 0.35 * dt * 8);
+    }
 
-    // Visual banking / pitch
-    const targetPitch = (this.input.forward ? -0.28 : 0) + (this.input.back ? 0.18 : 0);
-    const targetRoll = (this.input.left ? 0.35 : 0) + (this.input.right ? -0.35 : 0);
-    this.pitch = THREE.MathUtils.damp(this.pitch, targetPitch, 6, dt);
-    this.roll = THREE.MathUtils.damp(this.roll, targetRoll, 6, dt);
+    // Visual banking / pitch from dynamics
+    const attitude = computeAttitudeTargets(
+      this.axes,
+      this.velocity,
+      this.yaw,
+      this.boost.active,
+    );
+    this.pitch = THREE.MathUtils.damp(
+      this.pitch,
+      attitude.pitch,
+      FLIGHT.attitudeResponse,
+      dt,
+    );
+    this.roll = THREE.MathUtils.damp(
+      this.roll,
+      attitude.roll,
+      FLIGHT.attitudeResponse,
+      dt,
+    );
 
     this.heli.rotation.order = 'YXZ';
     this.heli.rotation.y = this.yaw;
@@ -276,22 +440,18 @@ export class HelicopterController {
   }
 
   private updateCamera(dt: number) {
-    const back = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    this.camPos
-      .copy(this.heli.position)
-      .addScaledVector(back, this.camOffset.z)
-      .add(new THREE.Vector3(0, this.camOffset.y, 0));
-
-    // Slight look-ahead
-    this.camLook.copy(this.heli.position).add(new THREE.Vector3(0, 1.2, 0));
-    this.camLook.addScaledVector(
-      new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)),
-      4,
+    updateChaseCamera(
+      this.camState,
+      this.camera,
+      this.heli.position,
+      this.velocity,
+      this.yaw,
+      this.pitch,
+      this.roll,
+      this.getSpeed(),
+      this.boost.active,
+      FLIGHT.maxSpeed,
+      dt,
     );
-
-    this.camSmooth.lerp(this.camPos, 1 - Math.exp(-4 * dt));
-    this.lookSmooth.lerp(this.camLook, 1 - Math.exp(-5 * dt));
-    this.camera.position.copy(this.camSmooth);
-    this.camera.lookAt(this.lookSmooth);
   }
 }
