@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { createSceneSetup } from './scene/setup';
 import { loadMapWorld, buildFigureEightRingLayout, type WorldObjects } from './world/mapLoader';
 import { updateWater } from './world/generate';
-import { loadHelicopter } from './models/helicopter';
+import { loadHelicopter, updateHelicopterVisuals } from './models/helicopter';
 import { HelicopterController } from './helicopter/controller';
 import { CheckpointSystem } from './rings/checkpoints';
 import { HUD } from './hud/hud';
@@ -150,6 +150,19 @@ function animate() {
 
   const speed = controller.getSpeed();
   const altitude = controller.getAltitude();
+
+  // Current-gen heli presentation: nav blink, rotor blur, exhaust, damage look.
+  const missionHud = phase === 'playing' || phase === 'complete' || phase === 'failed'
+    ? mission.getHudState()
+    : null;
+  updateHelicopterVisuals(heli, {
+    dt,
+    time,
+    speed,
+    boosting: controller.isBoosting(),
+    health: missionHud?.health ?? controller.getHealth(),
+    healthMax: missionHud?.healthMax ?? 100,
+  });
 
   fx.update({
     dt,
