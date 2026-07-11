@@ -8,6 +8,7 @@ import { CheckpointSystem } from './rings/checkpoints';
 import { HUD } from './hud/hud';
 import { MobileControls } from './hud/mobileControls';
 import { VisualEffects } from './effects/visualEffects';
+import { getGameAudio } from './audio';
 
 type GamePhase = 'loading' | 'start' | 'playing' | 'complete';
 
@@ -22,6 +23,7 @@ const loadingStatus = document.getElementById('loading-status');
 const sceneSetup = createSceneSetup(canvas);
 const { scene, camera, sunLight } = sceneSetup;
 const fx = new VisualEffects(sceneSetup);
+const audio = getGameAudio();
 
 let world: WorldObjects;
 let controller: HelicopterController;
@@ -34,6 +36,7 @@ let phase: GamePhase = 'loading';
 let elapsed = 0;
 let clock = new THREE.Clock();
 let ready = false;
+let lastRingCount = 0;
 
 function setLoadingText(msg: string) {
   if (loadingStatus) loadingStatus.textContent = msg;
@@ -43,15 +46,20 @@ function startGame() {
   if (!ready || phase === 'loading') return;
   phase = 'playing';
   elapsed = 0;
+  lastRingCount = 0;
   checkpoints.reset();
   controller.reset(world.spawnPosition);
   controller.enabled = true;
   fx.resetTrail();
   startOverlay.classList.add('hidden');
   completeOverlay.classList.add('hidden');
+  hud.resetVisuals();
   hud.show();
   hud.update(0, 0, controller.getAltitude(), 0);
   mobileControls.show();
+  void audio.resume();
+  audio.playStart();
+  audio.startFlightAmbience();
   clock.start();
 }
 
@@ -59,6 +67,8 @@ function completeGame() {
   phase = 'complete';
   controller.enabled = false;
   mobileControls.hide();
+  audio.stopFlightAmbience();
+  audio.playMissionComplete();
   finalTimeEl.textContent = hud.formatTime(elapsed);
   completeOverlay.classList.remove('hidden');
 }
@@ -70,12 +80,19 @@ function restartGame() {
 
 startBtn.disabled = true;
 startBtn.addEventListener('click', () => {
-  if (phase === 'start') startGame();
+  if (phase === 'start') {
+    audio.playUIConfirm();
+    startGame();
+  }
 });
-restartBtn.addEventListener('click', () => restartGame());
+restartBtn.addEventListener('click', () => {
+  audio.playUISelect();
+  restartGame();
+});
 
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Enter' && phase === 'start') {
+    audio.playUIConfirm();
     startGame();
   }
   if (e.code === 'KeyR' && (phase === 'playing' || phase === 'complete')) {
@@ -111,6 +128,7 @@ function animate() {
     altitude,
     getGroundHeight: world.getGroundHeight,
   });
+  hud.tick(dt);
 
   // Soft follow shadow camera on heli — wider frustum for Fruzer map
   const shadowReach = Math.max(120, world.mapHalfExtent * 0.9);
@@ -132,6 +150,18 @@ function animate() {
     elapsed += dt;
     checkpoints.tryCollect(heli.position);
     hud.update(elapsed, speed, altitude, checkpoints.collectedCount);
+    audio.updateFlight({
+      speed,
+      altitude,
+      throttle: Math.min(1, speed / 55),
+      boosting: controller.isBoosting(),
+    });
+
+    if (checkpoints.collectedCount > lastRingCount) {
+      lastRingCount = checkpoints.collectedCount;
+      hud.pulseRingCollect();
+      audio.playRingCollect();
+    }
 
     if (checkpoints.complete) {
       completeGame();
@@ -175,12 +205,15 @@ async function boot() {
     );
     checkpoints = new CheckpointSystem(scene, ringLayout);
     hud = new HUD(checkpoints.total);
+    hud.bindMuteHandler((muted) => audio.setMuted(muted));
+    hud.onWeaponReadyChange = (ready) => audio.notifyWeaponReady(ready);
     mobileControls = new MobileControls({
       setInput: (input) => controller.setTouchInput(input),
       clearInput: () => controller.clearTouchInput(),
       onRestart: () => {
         if (phase === 'playing') restartGame();
       },
+      onUiTap: () => audio.playUISelect(),
     });
 
     ready = true;

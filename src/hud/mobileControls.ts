@@ -1,42 +1,64 @@
 import type { InputState } from '../helicopter/controller';
 
-type InputSetter = (input: Partial<InputState>) => void;
+/** Touch payload — extends baseline InputState with optional analog / boost. */
+export type TouchInputPayload = Partial<InputState> & {
+  boost?: boolean;
+  /** -1 left … +1 right */
+  steerX?: number;
+  /** -1 back … +1 forward */
+  steerY?: number;
+};
 
-interface MobileControlsOptions {
+type InputSetter = (input: TouchInputPayload) => void;
+
+export interface MobileControlsOptions {
   setInput: InputSetter;
   clearInput: () => void;
   onRestart: () => void;
+  /** Optional fire hold callback for combat integration. */
+  onFireChange?: (held: boolean) => void;
+  /** Optional UI click feedback (audio). */
+  onUiTap?: () => void;
 }
 
 const MOBILE_VIEWPORT_QUERY = '(max-width: 900px)';
 const COARSE_POINTER_QUERY = '(pointer: coarse)';
 
+type ActionKey = 'up' | 'down' | 'boost';
+
 export class MobileControls {
   private readonly root: HTMLElement;
   private readonly stick: HTMLElement;
   private readonly restartButton: HTMLElement;
-  private readonly altitudeButtons: HTMLButtonElement[];
+  private readonly actionButtons: HTMLButtonElement[];
+  private readonly fireButton: HTMLButtonElement | null;
   private readonly mobileViewportQuery = window.matchMedia(MOBILE_VIEWPORT_QUERY);
   private readonly coarsePointerQuery = window.matchMedia(COARSE_POINTER_QUERY);
-  private readonly activeAltitudePointers = new Map<number, keyof InputState>();
+  private readonly activeActionPointers = new Map<number, ActionKey>();
+  private readonly activeFirePointers = new Set<number>();
   private readonly setInput: InputSetter;
   private readonly clearInput: () => void;
   private readonly onRestart: () => void;
+  private readonly onFireChange: ((held: boolean) => void) | null;
+  private readonly onUiTap: (() => void) | null;
 
   private activeStickPointerId: number | null = null;
   private playing = false;
 
-  constructor({ setInput, clearInput, onRestart }: MobileControlsOptions) {
+  constructor({ setInput, clearInput, onRestart, onFireChange, onUiTap }: MobileControlsOptions) {
     this.setInput = setInput;
     this.clearInput = clearInput;
     this.onRestart = onRestart;
+    this.onFireChange = onFireChange ?? null;
+    this.onUiTap = onUiTap ?? null;
 
     this.root = document.getElementById('mobile-controls')!;
     this.stick = document.getElementById('mobile-stick')!;
     this.restartButton = document.getElementById('mobile-restart')!;
-    this.altitudeButtons = Array.from(
+    this.actionButtons = Array.from(
       this.root.querySelectorAll<HTMLButtonElement>('[data-mobile-input]'),
     );
+    this.fireButton = document.getElementById('mobile-fire') as HTMLButtonElement | null;
 
     this.bindEvents();
     this.updateVisibility();
@@ -44,7 +66,6 @@ export class MobileControls {
 
   show() {
     this.playing = true;
-    // Force a fresh visibility pass after play starts (viewport may have changed)
     this.updateVisibility();
   }
 
@@ -58,7 +79,6 @@ export class MobileControls {
     const onViewportChange = () => this.updateVisibility();
     this.mobileViewportQuery.addEventListener('change', onViewportChange);
     this.coarsePointerQuery.addEventListener('change', onViewportChange);
-    // Older Safari
     if ('addListener' in this.mobileViewportQuery) {
       (this.mobileViewportQuery as MediaQueryList).addListener(onViewportChange);
       (this.coarsePointerQuery as MediaQueryList).addListener(onViewportChange);
@@ -76,18 +96,25 @@ export class MobileControls {
     this.stick.addEventListener('pointercancel', this.handleStickPointerEnd);
     this.stick.addEventListener('lostpointercapture', this.handleStickPointerEnd);
 
-    for (const button of this.altitudeButtons) {
-      button.addEventListener('pointerdown', this.handleAltitudePointerDown);
-      button.addEventListener('pointerup', this.handleAltitudePointerEnd);
-      button.addEventListener('pointercancel', this.handleAltitudePointerEnd);
-      button.addEventListener('lostpointercapture', this.handleAltitudePointerEnd);
+    for (const button of this.actionButtons) {
+      button.addEventListener('pointerdown', this.handleActionPointerDown);
+      button.addEventListener('pointerup', this.handleActionPointerEnd);
+      button.addEventListener('pointercancel', this.handleActionPointerEnd);
+      button.addEventListener('lostpointercapture', this.handleActionPointerEnd);
+    }
+
+    if (this.fireButton) {
+      this.fireButton.addEventListener('pointerdown', this.handleFirePointerDown);
+      this.fireButton.addEventListener('pointerup', this.handleFirePointerEnd);
+      this.fireButton.addEventListener('pointercancel', this.handleFirePointerEnd);
+      this.fireButton.addEventListener('lostpointercapture', this.handleFirePointerEnd);
     }
 
     this.restartButton.addEventListener('pointerdown', (event) => {
       event.preventDefault();
-      if (this.isVisible()) {
-        this.onRestart();
-      }
+      if (!this.isVisible()) return;
+      this.onUiTap?.();
+      this.onRestart();
     });
   }
 
@@ -95,10 +122,7 @@ export class MobileControls {
     const shouldShow = this.playing && this.supportsTouchControls();
     this.root.classList.toggle('hidden', !shouldShow);
     this.root.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
-
-    if (!shouldShow) {
-      this.releaseAllInputs();
-    }
+    if (!shouldShow) this.releaseAllInputs();
   }
 
   private supportsTouchControls(): boolean {
@@ -124,7 +148,6 @@ export class MobileControls {
   private readonly handleStickPointerDown = (event: PointerEvent) => {
     if (!this.isVisible()) return;
     event.preventDefault();
-
     this.activeStickPointerId = event.pointerId;
     this.capturePointer(this.stick, event.pointerId);
     this.updateStickInput(event);
@@ -143,24 +166,43 @@ export class MobileControls {
     this.resetStick();
   };
 
-  private readonly handleAltitudePointerDown = (event: PointerEvent) => {
+  private readonly handleActionPointerDown = (event: PointerEvent) => {
     if (!this.isVisible()) return;
     event.preventDefault();
 
     const button = event.currentTarget as HTMLButtonElement;
-    const inputKey = button.dataset.mobileInput as keyof InputState | undefined;
-    if (inputKey !== 'up' && inputKey !== 'down') return;
+    const inputKey = button.dataset.mobileInput as ActionKey | undefined;
+    if (inputKey !== 'up' && inputKey !== 'down' && inputKey !== 'boost') return;
 
-    this.activeAltitudePointers.set(event.pointerId, inputKey);
+    this.activeActionPointers.set(event.pointerId, inputKey);
     this.capturePointer(button, event.pointerId);
-    this.applyAltitudeInputs();
+    this.applyActionInputs();
   };
 
-  private readonly handleAltitudePointerEnd = (event: PointerEvent) => {
-    if (!this.activeAltitudePointers.has(event.pointerId)) return;
+  private readonly handleActionPointerEnd = (event: PointerEvent) => {
+    if (!this.activeActionPointers.has(event.pointerId)) return;
     event.preventDefault();
-    this.activeAltitudePointers.delete(event.pointerId);
-    this.applyAltitudeInputs();
+    this.activeActionPointers.delete(event.pointerId);
+    this.applyActionInputs();
+  };
+
+  private readonly handleFirePointerDown = (event: PointerEvent) => {
+    if (!this.isVisible() || !this.fireButton) return;
+    event.preventDefault();
+    this.activeFirePointers.add(event.pointerId);
+    this.capturePointer(this.fireButton, event.pointerId);
+    this.fireButton.classList.add('is-active');
+    this.onUiTap?.();
+    this.onFireChange?.(true);
+  };
+
+  private readonly handleFirePointerEnd = (event: PointerEvent) => {
+    if (!this.activeFirePointers.has(event.pointerId)) return;
+    event.preventDefault();
+    this.activeFirePointers.delete(event.pointerId);
+    const held = this.activeFirePointers.size > 0;
+    this.fireButton?.classList.toggle('is-active', held);
+    this.onFireChange?.(held);
   };
 
   private updateStickInput(event: PointerEvent) {
@@ -175,6 +217,8 @@ export class MobileControls {
     const x = rawX * scale;
     const y = rawY * scale;
     const threshold = rect.width * 0.12;
+    const normX = Math.max(-1, Math.min(1, rawX / maxDistance));
+    const normY = Math.max(-1, Math.min(1, -rawY / maxDistance));
 
     this.stick.style.setProperty('--stick-x', `${x}px`);
     this.stick.style.setProperty('--stick-y', `${y}px`);
@@ -183,6 +227,8 @@ export class MobileControls {
       back: rawY > threshold,
       left: rawX < -threshold,
       right: rawX > threshold,
+      steerX: Math.abs(normX) > 0.12 ? normX : 0,
+      steerY: Math.abs(normY) > 0.12 ? normY : 0,
     });
   }
 
@@ -194,31 +240,40 @@ export class MobileControls {
       back: false,
       left: false,
       right: false,
+      steerX: 0,
+      steerY: 0,
     });
   }
 
-  private applyAltitudeInputs() {
+  private applyActionInputs() {
     let up = false;
     let down = false;
+    let boost = false;
 
-    for (const input of this.activeAltitudePointers.values()) {
+    for (const input of this.activeActionPointers.values()) {
       up ||= input === 'up';
       down ||= input === 'down';
+      boost ||= input === 'boost';
     }
 
-    this.setInput({ up, down });
+    this.setInput({ up, down, boost });
 
-    for (const button of this.altitudeButtons) {
-      const inputKey = button.dataset.mobileInput;
-      button.classList.toggle('is-active', inputKey === 'up' ? up : down);
+    for (const button of this.actionButtons) {
+      const key = button.dataset.mobileInput;
+      const active =
+        key === 'up' ? up : key === 'down' ? down : key === 'boost' ? boost : false;
+      button.classList.toggle('is-active', active);
     }
   }
 
   private releaseAllInputs() {
     this.activeStickPointerId = null;
-    this.activeAltitudePointers.clear();
+    this.activeActionPointers.clear();
+    this.activeFirePointers.clear();
     this.resetStick();
-    this.applyAltitudeInputs();
+    this.applyActionInputs();
+    this.fireButton?.classList.remove('is-active');
+    this.onFireChange?.(false);
     this.clearInput();
   }
 
@@ -226,7 +281,7 @@ export class MobileControls {
     try {
       element.setPointerCapture(pointerId);
     } catch {
-      // The pointer may already be released on some mobile browsers.
+      // Pointer may already be released on some mobile browsers.
     }
   }
 }
