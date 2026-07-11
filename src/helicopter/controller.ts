@@ -21,6 +21,7 @@ import {
   getShakeTrauma,
   type ChaseCameraState,
 } from './chaseCamera';
+import type { ImpactKind, WorldCollision, WorldImpactResult } from '../collision';
 
 export interface InputState {
   forward: boolean;
@@ -60,6 +61,14 @@ export interface DamageState {
   totalDamage: number;
 }
 
+export interface ImpactEventInfo {
+  source: 'ground' | 'building';
+  kind: ImpactKind;
+  scrape: boolean;
+  crash: boolean;
+  closingSpeed: number;
+}
+
 function createInputState(): InputState {
   return {
     forward: false,
@@ -85,7 +94,7 @@ function resetInputState(input: InputState) {
 /**
  * Arcade helicopter controller: WASD / arrows + Space/Shift,
  * E/Q boost, soft banking, dynamic chase camera, hover assist,
- * soft ground collision with damage/shake hooks, soft world bounds.
+ * soft ground + building collision with damage/shake hooks, soft world bounds.
  */
 export class HelicopterController {
   readonly heli: THREE.Group;
@@ -110,13 +119,21 @@ export class HelicopterController {
   private worldBound = 105;
   private maxAltitude = 200;
   private boundPressure = 0;
+  private worldCollision: WorldCollision | null = null;
+  private lastWorldImpact: WorldImpactResult | null = null;
+  private scrapeShakeTimer = 0;
+  private scrapeNotifyCooldown = 0;
 
   private mainRotor: THREE.Object3D | null = null;
   private tailRotor: THREE.Object3D | null = null;
   private rotorBlur: THREE.Mesh | null = null;
 
-  /** Optional listener for impact events (intensity 0..1, damage dealt). */
-  onImpact: ((intensity: number, damage: number) => void) | null = null;
+  /**
+   * Impact listener: intensity 0..1, damage dealt, optional world/ground info.
+   */
+  onImpact:
+    | ((intensity: number, damage: number, info?: ImpactEventInfo) => void)
+    | null = null;
 
   enabled = false;
 
@@ -135,6 +152,19 @@ export class HelicopterController {
     this.rotorBlur = (heli.getObjectByName('rotorBlur') as THREE.Mesh) ?? null;
 
     this.bindInput();
+  }
+
+  /** Wire map-derived building/prop colliders. */
+  setWorldCollision(collision: WorldCollision | null) {
+    this.worldCollision = collision;
+  }
+
+  getWorldCollision(): WorldCollision | null {
+    return this.worldCollision;
+  }
+
+  getLastWorldImpact(): WorldImpactResult | null {
+    return this.lastWorldImpact;
   }
 
   private bindInput() {
@@ -238,6 +268,9 @@ export class HelicopterController {
     this.evasiveSide = 0;
     this.boundPressure = 0;
     this.damage = { health: 100, lastImpact: 0, totalDamage: 0 };
+    this.lastWorldImpact = null;
+    this.scrapeShakeTimer = 0;
+    this.scrapeNotifyCooldown = 0;
     resetChaseCamera(this.camState, spawn);
     this.camera.fov = this.camState.currentFov;
     this.camera.updateProjectionMatrix();
@@ -325,6 +358,29 @@ export class HelicopterController {
     return a;
   }
 
+  private applyImpactDamage(
+    intensity: number,
+    damage: number,
+    info: ImpactEventInfo,
+  ) {
+    if (intensity > 0.02) {
+      const shakeMul = info.scrape ? 0.45 : info.crash ? 1.05 : 0.85;
+      triggerCameraShake(this.camState, intensity * shakeMul);
+    }
+    if (damage > 0) {
+      this.damage.health = Math.max(0, this.damage.health - damage);
+      this.damage.lastImpact = Math.max(this.damage.lastImpact, intensity);
+      this.damage.totalDamage += damage;
+      this.onImpact?.(intensity, damage, info);
+      if (info.scrape) this.scrapeNotifyCooldown = 0.2;
+      return;
+    }
+    if (info.scrape && intensity > 0.05 && this.scrapeNotifyCooldown <= 0) {
+      this.scrapeNotifyCooldown = 0.28;
+      this.onImpact?.(intensity, 0, info);
+    }
+  }
+
   update(dt: number) {
     // Rotor animation always runs for visual life.
     const rotorSpeed = 28 + this.getSpeed() * 0.4 + (this.boost.active ? 12 : 0);
@@ -341,6 +397,10 @@ export class HelicopterController {
     if (!this.enabled) {
       this.updateCamera(dt);
       return;
+    }
+
+    if (this.scrapeNotifyCooldown > 0) {
+      this.scrapeNotifyCooldown = Math.max(0, this.scrapeNotifyCooldown - dt);
     }
 
     this.buildTargetAxes();
@@ -385,17 +445,45 @@ export class HelicopterController {
     this.heli.position.addScaledVector(this.velocity, dt);
 
     // Soft ground collision + damage/shake hooks
+    const groundClosing = Math.max(0, -this.velocity.y);
     const impact = resolveGroundImpact(this.heli.position, this.velocity, ground, 2.0);
-    if (impact.intensity > 0.02) {
-      triggerCameraShake(this.camState, impact.intensity * 0.85);
-      if (impact.damage > 0) {
-        this.damage.health = Math.max(0, this.damage.health - impact.damage);
-        this.damage.lastImpact = impact.intensity;
-        this.damage.totalDamage += impact.damage;
-        this.onImpact?.(impact.intensity, impact.damage);
-      }
+    if (impact.intensity > 0.02 || impact.damage > 0) {
+      this.applyImpactDamage(impact.intensity, impact.damage, {
+        source: 'ground',
+        kind: impact.damage > 8 ? 'crash' : impact.intensity > 0.08 ? 'scrape' : 'none',
+        scrape: impact.damage > 0 && impact.damage <= 8,
+        crash: impact.damage > 8,
+        closingSpeed: groundClosing,
+      });
     } else {
       this.damage.lastImpact = Math.max(0, this.damage.lastImpact - dt * 2);
+    }
+
+    // Building / prop AABB collision — scrape along walls, crash on hard hits
+    if (this.worldCollision) {
+      const worldHit = this.worldCollision.resolve(
+        this.heli.position,
+        this.velocity,
+        dt,
+      );
+      this.lastWorldImpact = worldHit;
+      if (worldHit.contact.hit) {
+        if (worldHit.scrape) {
+          this.scrapeShakeTimer = Math.max(this.scrapeShakeTimer, 0.12);
+        }
+        this.applyImpactDamage(worldHit.intensity, worldHit.damage, {
+          source: 'building',
+          kind: worldHit.impactKind,
+          scrape: worldHit.scrape,
+          crash: worldHit.crash,
+          closingSpeed: worldHit.closingSpeed,
+        });
+      }
+    }
+
+    if (this.scrapeShakeTimer > 0) {
+      this.scrapeShakeTimer -= dt;
+      triggerCameraShake(this.camState, 0.08 * dt * 10);
     }
 
     // Soft world bounds + altitude ceiling

@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { COLORS, createSunsetSkyDome, createSunDisc } from '../scene/setup';
 import { createEnvironmentLayer, type EnvironmentLayer } from './environmentLayer';
+import { WorldCollision } from '../collision';
 
 /** Target play-area width (largest XZ extent after scale), in world units */
 export const MAP_TARGET_SIZE = 260;
@@ -22,6 +23,8 @@ export interface WorldObjects {
   landingPad: THREE.Group;
   spawnPosition: THREE.Vector3;
   getGroundHeight: (x: number, z: number) => number;
+  /** Building/prop AABB collision (null if bake skipped). */
+  collision: WorldCollision | null;
   /** Half-extent of playable XZ after scale (approx) */
   mapHalfExtent: number;
   bounds: THREE.Box3;
@@ -608,6 +611,19 @@ export async function loadMapWorld(
     FALLBACK_GROUND_Y,
   );
 
+  // Derive AABB proxies + spatial hash for heli vs buildings (no physics engine)
+  onProgress?.(0.88);
+  let collision: WorldCollision | null = null;
+  try {
+    collision = WorldCollision.fromMeshes(colliders, bounds, {
+      maxColliders: 850,
+      minBuildingHeight: 2.0,
+      minFootprint: 2.2,
+    });
+  } catch (err) {
+    console.warn('[map] building collision bake failed', err);
+  }
+
   // Prefer open outdoor ground with clear sky (avoid hangar pits / under-roofs)
   const open = findOpenSpawn(
     getGroundHeight,
@@ -649,6 +665,7 @@ export async function loadMapWorld(
     landingPad,
     spawnPosition,
     getGroundHeight,
+    collision,
     mapHalfExtent,
     bounds,
     sky,

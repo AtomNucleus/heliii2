@@ -237,6 +237,10 @@ async function boot() {
     if (typeof controller.setMaxAltitude === 'function') {
       controller.setMaxAltitude(Math.max(200, world.bounds.max.y + 80));
     }
+    if (world.collision) {
+      world.collision.attachDebug(scene);
+      controller.setWorldCollision(world.collision);
+    }
     controller.reset(world.spawnPosition);
 
     const ringLayout = buildFigureEightRingLayout(
@@ -298,10 +302,37 @@ async function boot() {
       }
     });
 
-    controller.onImpact = (intensity, damage) => {
-      if (damage > 0) mission.applyExternalDamage(damage, 'hard-landing');
-      audio.playImpact(intensity, damage > 8 ? 'damage' : 'hard');
+    controller.onImpact = (intensity, damage, info) => {
+      const source =
+        info?.source === 'building'
+          ? info.crash
+            ? 'building-crash'
+            : info.scrape
+              ? 'building-scrape'
+              : 'building-impact'
+          : 'hard-landing';
+      if (damage > 0) mission.applyExternalDamage(damage, source);
+      if (info?.scrape && !info.crash) {
+        audio.playImpact(Math.max(0.25, intensity), damage > 0 ? 'soft' : 'soft');
+      } else {
+        audio.playImpact(
+          intensity,
+          damage > 8 || info?.crash ? 'damage' : 'hard',
+        );
+      }
     };
+
+    // Collision debug: ?debugCollision=1 or press C
+    window.addEventListener('keydown', (e) => {
+      if (e.code !== 'KeyC' || e.repeat) return;
+      if (!world.collision) return;
+      const on = world.collision.toggleDebug();
+      hud.toast(on ? 'COLLISION DEBUG ON' : 'COLLISION DEBUG OFF', 1.2);
+      if (on) {
+        const s = world.collision.getStats();
+        console.info('[collision] debug', s);
+      }
+    });
 
     mobileControls = new MobileControls({
       setInput: (input) => controller.setTouchInput(input),

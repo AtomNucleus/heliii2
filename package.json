@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "tsx --test src/combat/ai/ai.test.ts",
-    "test:ai": "tsx --test src/combat/ai/ai.test.ts"
+    "test:ai": "tsx --test src/combat/ai/ai.test.ts",
+    "test:collision": "node scripts/verify-collision.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.170.0",
