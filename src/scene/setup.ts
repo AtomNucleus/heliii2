@@ -239,8 +239,9 @@ export function createSceneSetupWithRenderer(
   sunLight.shadow.camera.right = 140;
   sunLight.shadow.camera.top = 140;
   sunLight.shadow.camera.bottom = -140;
-  sunLight.shadow.bias = -0.00045;
-  sunLight.shadow.normalBias = 0.04;
+  sunLight.shadow.bias = -0.00032;
+  sunLight.shadow.normalBias = 0.03;
+  sunLight.shadow.radius = 2.5;
   scene.add(sunLight);
 
   // Cool fill — keeps shadowed Fruzer faces readable
@@ -352,6 +353,10 @@ export function createSceneSetupWithRenderer(
         sunLight.shadow.map?.dispose();
         sunLight.shadow.map = null;
       }
+      // Tighter contact treatment — reduce peter-panning without acne.
+      sunLight.shadow.bias = q.tier === 'high' ? -0.00028 : -0.0004;
+      sunLight.shadow.normalBias = q.tier === 'high' ? 0.028 : 0.035;
+      sunLight.shadow.radius = q.tier === 'low' ? 1 : q.tier === 'medium' ? 2 : 3;
     }
   };
 

@@ -2,6 +2,13 @@ import * as THREE from 'three';
 import { COLORS } from '../../scene/setup';
 import type { CombatFxBudget } from './budgets';
 import { SlotPool } from './pool';
+import {
+  DebrisPhysicsWorld,
+  getSharedDebrisPhysics,
+  type DebrisPhysicsBudget,
+  debrisPhysicsBudgetFromTier,
+} from '../../physics';
+import type { QualityTier } from '../quality';
 
 interface DebrisSlot {
   mesh: THREE.Mesh;
@@ -15,7 +22,8 @@ interface DebrisSlot {
 const DEBRIS_COLORS = [0x4a5560, 0x3a3030, 0x5a4030, 0x2a3238, COLORS.orangeHot];
 
 /**
- * Tumbling mesh shards for destruction — pooled boxes / tetrahedra.
+ * Tumbling mesh shards for destruction — prefers shared Rapier debris world
+ * when available; otherwise pooled kinematic boxes / tetrahedra.
  */
 export class DebrisSystem {
   readonly group = new THREE.Group();
@@ -24,6 +32,8 @@ export class DebrisSystem {
   private readonly pool: SlotPool<DebrisSlot>;
   private readonly sharedGeos: THREE.BufferGeometry[];
   private readonly gravity = 22;
+  private physics: DebrisPhysicsWorld | null = null;
+  private physicsOwnsVisuals = false;
 
   constructor(parent: THREE.Object3D, budget: CombatFxBudget) {
     this.group.name = 'combat-debris';
@@ -44,10 +54,39 @@ export class DebrisSystem {
       },
       8,
     );
+
+    this.bindPhysics(getSharedDebrisPhysics());
+  }
+
+  /** Wire / re-wire Rapier (or kinematic) debris world after async init. */
+  bindPhysics(world: DebrisPhysicsWorld | null) {
+    this.physics = world;
+    this.physicsOwnsVisuals = !!world;
+    if (world && world.group.parent !== this.group) {
+      this.group.add(world.group);
+    }
+  }
+
+  setFollowTarget(pos: THREE.Vector3 | null) {
+    this.physics?.setFollowTarget(pos);
   }
 
   applyBudget(budget: CombatFxBudget) {
     this.budget = budget;
+    if (this.physics) {
+      const tier: QualityTier =
+        budget.scale < 0.55 ? 'low' : budget.scale < 0.9 ? 'medium' : 'high';
+      const pb: DebrisPhysicsBudget = {
+        ...debrisPhysicsBudgetFromTier(tier),
+        maxBodies: Math.min(debrisPhysicsBudgetFromTier(tier).maxBodies, budget.maxDebris),
+        maxPerBurst: Math.min(
+          debrisPhysicsBudgetFromTier(tier).maxPerBurst,
+          Math.max(2, budget.debrisPerKill),
+        ),
+        enabled: budget.enableDebris,
+      };
+      this.physics.applyBudget(pb);
+    }
   }
 
   private createSlot(): DebrisSlot {
@@ -78,6 +117,13 @@ export class DebrisSystem {
 
   spawn(position: THREE.Vector3, scale = 1, colorHint?: number) {
     if (!this.budget.enableDebris) return;
+
+    if (this.physicsOwnsVisuals && this.physics) {
+      const impulse = Math.max(1, scale * 10);
+      this.physics.spawnAt(position, impulse, colorHint);
+      return;
+    }
+
     const n = Math.max(
       2,
       Math.floor(this.budget.debrisPerKill * this.budget.scale * Math.min(1.6, scale)),
@@ -124,6 +170,11 @@ export class DebrisSystem {
   }
 
   update(dt: number) {
+    if (this.physicsOwnsVisuals && this.physics) {
+      this.physics.update(dt);
+      return;
+    }
+
     for (let i = this.active.length - 1; i >= 0; i--) {
       const slot = this.active[i];
       slot.life -= dt;
@@ -148,6 +199,9 @@ export class DebrisSystem {
   }
 
   clear() {
+    if (this.physicsOwnsVisuals && this.physics) {
+      this.physics.clear();
+    }
     for (const slot of this.active) this.pool.release(slot);
     this.active.length = 0;
   }
@@ -158,5 +212,6 @@ export class DebrisSystem {
     this.pool.forEach((slot) => {
       (slot.mesh.material as THREE.Material).dispose();
     });
+    // Shared physics world is disposed by boot/teardown owner, not here.
   }
 }

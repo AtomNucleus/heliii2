@@ -11,6 +11,7 @@ import { VisualEffects } from './effects/visualEffects';
 import { getGameAudio } from './audio';
 import { StrikeMission, formatEndSubtitle, type StrikeEndSummary } from './mission';
 import { applyRendererDiagnostics } from './render';
+import { ensureSharedDebrisPhysics, getSharedDebrisPhysics, setSharedDebrisPhysics } from './physics';
 
 type GamePhase = 'loading' | 'start' | 'playing' | 'complete' | 'failed';
 
@@ -154,7 +155,10 @@ function animate() {
 
   controller.update(dt);
   checkpoints.update(time);
-  if (world.water) updateWater(world.water, time);
+  // Water shimmer/wake owned by VisualEffects.WaterResponse when bound.
+  if (world.water && !fx.quality.current.waterResponse) {
+    updateWater(world.water, time);
+  }
   world.environment?.update(dt, time);
 
   const speed = controller.getSpeed();
@@ -174,6 +178,7 @@ function animate() {
     cameraPosition: camera.position,
   });
 
+  // VFX after environment so water-response can layer wake on foam.
   fx.update({
     dt,
     heliPos: heli.position,
@@ -181,6 +186,8 @@ function animate() {
     speed,
     altitude,
     getGroundHeight: world.getGroundHeight,
+    time,
+    waterY: world.water?.userData?.baseY ?? world.water?.position.y ?? -0.55,
   });
   hud.tick(dt);
 
@@ -311,6 +318,29 @@ async function boot() {
     sceneSetup.attachSky(world.sky);
     sceneSetup.attachSunDisc(world.sunDisc);
 
+    // Richer water response (MeshStandard — WebGPU/WebGL safe).
+    fx.bindWater(
+      world.water,
+      world.environment?.getFoamMeshes?.() ?? [],
+    );
+
+    // Visual-only Rapier debris — never blocks boot if WASM init fails.
+    setLoadingText('Initializing physics…');
+    try {
+      const debrisPhysics = await ensureSharedDebrisPhysics(
+        { groundY: 0 },
+        fx.quality.currentTier,
+      );
+      setSharedDebrisPhysics(debrisPhysics);
+      console.info(
+        `[physics] debris=${debrisPhysics.usingRapier ? 'rapier' : 'kinematic-fallback'}`
+        + ` maxBodies=${debrisPhysics.getBudget().maxBodies}`,
+      );
+    } catch (physErr) {
+      console.warn('[physics] debris init error — continuing without Rapier', physErr);
+      setSharedDebrisPhysics(null);
+    }
+
     setLoadingText('Loading helicopter…');
     heli = await loadHelicopter();
     scene.add(heli);
@@ -324,6 +354,7 @@ async function boot() {
       world.collision.attachDebug(scene);
       world.collision.setGroundHeightSampler(world.getGroundHeight);
       controller.setWorldCollision(world.collision);
+      world.collision.debris.bindPhysics(getSharedDebrisPhysics());
 
       world.collision.onProximity = (warning) => {
         if (phase !== 'playing') return;
@@ -358,12 +389,21 @@ async function boot() {
       },
       checkpoints,
     );
+    mission.effects.bindDebrisPhysics(getSharedDebrisPhysics());
     world.environment?.applyQuality(fx.quality.current);
     mission.setEffectsCamera(camera);
     mission.applyQuality(fx.quality.current);
     fx.quality.onChange((quality) => {
       mission.applyQuality(quality);
       world.environment?.applyQuality(quality);
+      const phys = getSharedDebrisPhysics();
+      if (phys) {
+        if (!quality.physicsDebris) {
+          phys.applyBudget({ ...phys.getBudget(), enabled: false });
+        } else {
+          phys.applyQualityTier(quality.tier);
+        }
+      }
     });
     mission.onRespawn = (pos) => {
       controller.reset(pos);

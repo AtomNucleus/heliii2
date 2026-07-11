@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import type { ColliderAABB, DestructResult } from './types';
 import type { SpatialHash } from './spatialHash';
+import {
+  DebrisPhysicsWorld,
+  getSharedDebrisPhysics,
+} from '../physics';
 
 /** Impulse / HP thresholds for shattering props. */
 export const DESTRUCT = {
@@ -113,8 +117,9 @@ function aabbCenter(box: ColliderAABB): THREE.Vector3 {
 }
 
 /**
- * Lightweight debris burst for shattered set-pieces.
- * Instanced-looking box chunks with gravity — no physics engine.
+ * Debris burst for shattered set-pieces.
+ * Prefers shared Rapier visual debris when available; otherwise
+ * lightweight kinematic boxes (no physics engine).
  */
 export class DebrisSystem {
   readonly group = new THREE.Group();
@@ -123,6 +128,9 @@ export class DebrisSystem {
   private readonly geo: THREE.BoxGeometry;
   private readonly mat: THREE.MeshBasicMaterial;
   private destroyedCount = 0;
+  private physics: DebrisPhysicsWorld | null = null;
+  /** When true, stepping is owned by CombatFx — avoid double Rapier steps. */
+  private physicsSteppedElsewhere = true;
 
   constructor() {
     this.group.name = 'collisionDebris';
@@ -133,6 +141,11 @@ export class DebrisSystem {
       opacity: 0.95,
       depthWrite: false,
     });
+    this.bindPhysics(getSharedDebrisPhysics());
+  }
+
+  bindPhysics(world: DebrisPhysicsWorld | null) {
+    this.physics = world;
   }
 
   attach(scene: THREE.Scene) {
@@ -144,6 +157,7 @@ export class DebrisSystem {
   }
 
   get alive(): number {
+    if (this.physics) return this.physics.activeCount + this.pieces.length;
     return this.pieces.length;
   }
 
@@ -152,6 +166,7 @@ export class DebrisSystem {
   }
 
   reset() {
+    if (this.physics) this.physics.clear();
     while (this.pieces.length) {
       const p = this.pieces.pop()!;
       p.mesh.visible = false;
@@ -162,12 +177,18 @@ export class DebrisSystem {
 
   spawn(center: THREE.Vector3, impulse: number, kind: ColliderAABB['kind'] = 'prop') {
     this.destroyedCount++;
+    const color = kind === 'building' ? 0x8a6a4a : 0xc4a574;
+
+    if (this.physics) {
+      this.physics.spawnAt(center, impulse, color);
+      return;
+    }
+
     const count = THREE.MathUtils.clamp(
       4 + Math.floor(impulse / 8),
       4,
       DESTRUCT.maxDebris,
     );
-    const color = kind === 'building' ? 0x8a6a4a : 0xc4a574;
     for (let i = 0; i < count; i++) {
       const piece = this.acquire();
       (piece.mesh.material as THREE.MeshBasicMaterial).color.setHex(color);
@@ -190,6 +211,15 @@ export class DebrisSystem {
   }
 
   update(dt: number) {
+    // Shared Rapier world is stepped by CombatFx to avoid double integration.
+    if (this.physics && this.physicsSteppedElsewhere) {
+      return;
+    }
+    if (this.physics) {
+      this.physics.update(dt);
+      return;
+    }
+
     for (let i = this.pieces.length - 1; i >= 0; i--) {
       const p = this.pieces[i];
       p.life -= dt;

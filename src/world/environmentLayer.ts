@@ -62,6 +62,10 @@ export class EnvironmentLayer {
   private disposed = false;
   private lastTier: EnvQualityTier | null = null;
 
+  getFoamMeshes(): THREE.Mesh[] {
+    return this.ocean.getFoamMeshes();
+  }
+
   constructor(opts: EnvironmentLayerOptions) {
     this.group.name = 'environment-layer';
     this.budget = getEnvBudget(opts.tier ?? detectEnvTier());

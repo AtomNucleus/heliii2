@@ -55,11 +55,14 @@ Prettier is configured for configs, scripts, e2e, docs, and the HTML shell. `src
 
 ```bash
 npm test                 # unit + verification scripts
-npm run test:unit        # Node unit tests (combat AI)
+npm run test:unit        # Node unit tests (combat AI, render prefs, physics budgets)
+npm run test:physics     # Rapier debris budget / fragment / lifecycle policies
 npm run test:collision   # collision math verification
 npm run test:mission     # mission authoring verification
 npm run smoke-test       # Playwright Chromium smoke (needs build + browser)
 ```
+
+See `PHYSICS_VISUAL.md` for the Rapier debris + visual fidelity slice (what shipped vs deferred).
 
 First-time Playwright setup (local):
 

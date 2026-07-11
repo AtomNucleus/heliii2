@@ -8,6 +8,7 @@ export interface OceanDressingHandle {
   water: THREE.Mesh;
   setVisibleCount(detail: number): void;
   update(dt: number, time: number): void;
+  getFoamMeshes(): THREE.Mesh[];
   dispose(): void;
 }
 
@@ -105,7 +106,8 @@ export function createOceanDressing(
       for (let i = 0; i < swellNodes.length; i++) swellNodes[i].visible = i < detail;
     },
     update(_dt: number, time: number) {
-      // Water plane shimmer is driven by `updateWater(world.water)` in main.
+      // Water plane shimmer may be driven by VisualEffects.WaterResponse.
+      // Keep foam/swell motion here as a baseline.
       for (let i = 0; i < foamNodes.length; i++) {
         const fmat = foamNodes[i].material as THREE.MeshStandardMaterial;
         fmat.opacity = 0.32 + 0.14 * Math.sin(time * 0.7 + i * 0.9);
@@ -113,6 +115,9 @@ export function createOceanDressing(
       for (let i = 0; i < swellNodes.length; i++) {
         swellNodes[i].position.y = 0.35 + Math.sin(time * 0.55 + i) * 0.22;
       }
+    },
+    getFoamMeshes(): THREE.Mesh[] {
+      return foamNodes.slice();
     },
     dispose() {
       disposeObject3D(group);

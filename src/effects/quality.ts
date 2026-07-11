@@ -23,6 +23,15 @@ export interface QualitySettings {
   cloudCount: number;
   windStreakCount: number;
   composerScale: number;
+  /** Additive sunset light shafts (not true volumetrics). */
+  lightShafts: boolean;
+  lightShaftCount: number;
+  /** Soft ground contact blob under the craft. */
+  contactShadow: boolean;
+  /** MeshStandard water response / wake cues. */
+  waterResponse: boolean;
+  /** Rapier visual debris (falls back to kinematic if init fails). */
+  physicsDebris: boolean;
 }
 
 const TIERS: Record<QualityTier, QualitySettings> = {
@@ -44,6 +53,11 @@ const TIERS: Record<QualityTier, QualitySettings> = {
     cloudCount: 4,
     windStreakCount: 8,
     composerScale: 0.75,
+    lightShafts: false,
+    lightShaftCount: 0,
+    contactShadow: true,
+    waterResponse: true,
+    physicsDebris: true,
   },
   medium: {
     tier: 'medium',
@@ -63,6 +77,11 @@ const TIERS: Record<QualityTier, QualitySettings> = {
     cloudCount: 7,
     windStreakCount: 14,
     composerScale: 0.9,
+    lightShafts: true,
+    lightShaftCount: 3,
+    contactShadow: true,
+    waterResponse: true,
+    physicsDebris: true,
   },
   high: {
     tier: 'high',
@@ -82,6 +101,11 @@ const TIERS: Record<QualityTier, QualitySettings> = {
     cloudCount: 10,
     windStreakCount: 22,
     composerScale: 1,
+    lightShafts: true,
+    lightShaftCount: 5,
+    contactShadow: true,
+    waterResponse: true,
+    physicsDebris: true,
   },
 };
 

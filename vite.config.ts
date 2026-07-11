@@ -16,6 +16,9 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          if (id.includes('node_modules/@dimforge/rapier')) {
+            return 'rapier';
+          }
           if (id.includes('node_modules/three/examples')) {
             return 'three-examples';
           }

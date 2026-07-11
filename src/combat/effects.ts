@@ -44,6 +44,10 @@ export class CombatEffects {
     this.fx.setFollowTarget(pos);
   }
 
+  bindDebrisPhysics(world: import('../physics').DebrisPhysicsWorld | null) {
+    this.fx.bindDebrisPhysics(world);
+  }
+
   setHullHealthRatio(ratio: number) {
     this.fx.setHullHealthRatio(ratio);
   }

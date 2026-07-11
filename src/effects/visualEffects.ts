@@ -8,6 +8,9 @@ import { SpeedEffects } from './speedEffects';
 import { AtmosphereEffects } from './atmosphere';
 import { WorldDressing } from './worldDressing';
 import { RotorAmbience } from './rotorAmbience';
+import { LightShafts } from './lightShafts';
+import { ContactShadow } from './contactShadow';
+import { WaterResponse } from './waterResponse';
 
 export interface VisualEffectsUpdateContext {
   dt: number;
@@ -20,6 +23,10 @@ export interface VisualEffectsUpdateContext {
   boosting?: boolean;
   /** Optional camera shake 0..1 */
   shake?: number;
+  /** Elapsed time for water / shafts */
+  time?: number;
+  /** Water plane Y if known */
+  waterY?: number;
 }
 
 /**
@@ -35,9 +42,13 @@ export class VisualEffects {
   readonly atmosphere: AtmosphereEffects;
   readonly dressing: WorldDressing;
   readonly rotor: RotorAmbience;
+  readonly lightShafts: LightShafts;
+  readonly contactShadow: ContactShadow;
+  readonly waterResponse: WaterResponse;
 
   private readonly sceneSetup: SceneSetup;
   private readonly unsub: () => void;
+  private readonly sunDir = new THREE.Vector3(0.55, 0.28, -0.45).normalize();
 
   constructor(sceneSetup: SceneSetup) {
     this.sceneSetup = sceneSetup;
@@ -53,9 +64,18 @@ export class VisualEffects {
     this.atmosphere = new AtmosphereEffects(sceneSetup.scene);
     this.dressing = new WorldDressing(sceneSetup.scene);
     this.rotor = new RotorAmbience(sceneSetup.scene);
+    this.lightShafts = new LightShafts(sceneSetup.scene);
+    this.contactShadow = new ContactShadow(sceneSetup.scene);
+    this.waterResponse = new WaterResponse();
 
     this.unsub = this.quality.onChange((q) => this.applyQuality(q));
     this.applyQuality(this.quality.current);
+  }
+
+  /** Bind ocean mesh for richer water response (after world load). */
+  bindWater(water: THREE.Mesh | null, foam?: THREE.Mesh[]) {
+    this.waterResponse.bind(water, this.sceneSetup.scene, foam);
+    this.waterResponse.applyQuality(this.quality.current);
   }
 
   applyQuality(q: QualitySettings) {
@@ -67,10 +87,24 @@ export class VisualEffects {
     this.atmosphere.applyQuality(q);
     this.dressing.applyQuality(q);
     this.rotor.applyQuality(q);
+    this.lightShafts.applyQuality(q);
+    this.contactShadow.applyQuality(q);
+    this.waterResponse.applyQuality(q);
   }
 
   update(ctx: VisualEffectsUpdateContext) {
-    const { dt, heliPos, heliQuat, speed, altitude, getGroundHeight, boosting, shake } = ctx;
+    const {
+      dt,
+      heliPos,
+      heliQuat,
+      speed,
+      altitude,
+      getGroundHeight,
+      boosting,
+      shake,
+      time,
+      waterY,
+    } = ctx;
     this.quality.update(dt);
 
     const boostMul = boosting ? 1.35 : 1;
@@ -93,6 +127,26 @@ export class VisualEffects {
     this.atmosphere.update(dt, heliPos, altitude, speed, getGroundHeight);
     this.dressing.update(dt, heliPos, this.sceneSetup.camera, altitude);
     this.rotor.update(dt, heliPos, heliQuat, speed);
+
+    this.sunDir.set(
+      this.sceneSetup.sunLight.position.x - heliPos.x,
+      this.sceneSetup.sunLight.position.y - heliPos.y,
+      this.sceneSetup.sunLight.position.z - heliPos.z,
+    ).normalize();
+    this.lightShafts.setSunDirection(this.sunDir);
+    this.lightShafts.update(dt, heliPos, this.sceneSetup.atmosphere.haze);
+    this.contactShadow.update(heliPos, altitude, getGroundHeight);
+
+    const elapsed = time ?? 0;
+    const wy = waterY ?? -0.55;
+    this.waterResponse.update({
+      time: elapsed,
+      dt,
+      heliPos,
+      altitude,
+      speed,
+      waterY: wy,
+    });
   }
 
   render() {
@@ -111,6 +165,9 @@ export class VisualEffects {
     this.atmosphere.dispose();
     this.dressing.dispose();
     this.rotor.dispose();
+    this.lightShafts.dispose();
+    this.contactShadow.dispose();
+    this.waterResponse.dispose();
   }
 }
 
@@ -122,6 +179,9 @@ export {
   AtmosphereEffects,
   WorldDressing,
   RotorAmbience,
+  LightShafts,
+  ContactShadow,
+  WaterResponse,
   createPostProcessing,
 };
 export type { QualitySettings, PostProcessingHandle };

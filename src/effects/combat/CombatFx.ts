@@ -160,6 +160,12 @@ export class CombatFx {
 
   setFollowTarget(pos: THREE.Vector3 | null) {
     this.followPos = pos;
+    this.debris.setFollowTarget(pos);
+  }
+
+  /** Bind shared Rapier (or kinematic) debris world after async boot. */
+  bindDebrisPhysics(world: import('../../physics').DebrisPhysicsWorld | null) {
+    this.debris.bindPhysics(world);
   }
 
   /** Drive continuous hull smoke/fire from mission health ratio. */
