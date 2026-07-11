@@ -7,6 +7,8 @@ import { CombatEffects } from './effects';
 import {
   DifficultyDirector,
   reinforceWaveSize,
+  pickReinforceRoles,
+  reinforceFormationForPressure,
   type DirectorBeat,
   type DirectorSnapshot,
 } from './ai';
@@ -242,9 +244,14 @@ export class CombatMission {
         director.threatBudget,
       );
       if (wave > 0) {
-        const pool = ['interceptor', 'gunship', 'escort', 'scout'] as const;
-        const roles = pool.slice(0, wave).map((r) => r);
-        const n = this.enemies.spawnReinforcement(roles, 'vic', heli.position);
+        const progress =
+          this.enemies.primaryTotal > 0
+            ? 1 - this.enemies.primaryAlive / this.enemies.primaryTotal
+            : 0;
+        const bias = progress > 0.65 ? 'late' : progress < 0.3 ? 'early' : 'mid';
+        const roles = pickReinforceRoles(director.pressure, wave, bias);
+        const formation = reinforceFormationForPressure(director.pressure);
+        const n = this.enemies.spawnReinforcement(roles, formation, heli.position);
         if (n > 0) {
           this.director.noteReinforcement(n);
           this.emit({ type: 'toast', message: 'HOSTILE REINFORCEMENTS' });

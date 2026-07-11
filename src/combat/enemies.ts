@@ -8,13 +8,17 @@ import {
   type TelegraphState,
   type MoveIntent,
   type DirectorSnapshot,
+  type WaveSpec,
+  type WaveRuntimeState,
+  type EliteProfile,
   getDroneRole,
   getTurretMode,
   createTelegraphState,
   defaultTelegraphConfig,
   updateTelegraph,
   steerDrone,
-  aimWithLead,
+  aimFair,
+  aimFlak,
   sweepYawOffset,
   planMissionEncounter,
   hashSeed,
@@ -22,8 +26,18 @@ import {
   buildFormation,
   slotWorldPosition,
   pickReinforceSpawnAnchor,
-  defaultEncounterBeats,
-  type EncounterBeat,
+  defaultWaveSheet,
+  createWaveRuntime,
+  resetWaveRuntime,
+  pickNextWave,
+  markWaveFired,
+  compileWaveSpecs,
+  shouldReclaimCorpse,
+  getEliteProfile,
+  finaleEliteRoles,
+  shouldReleaseFinale,
+  formationSlotWorld,
+  ObjectPool,
   v3,
 } from './ai';
 
@@ -71,6 +85,13 @@ export interface Enemy {
   preferredRange: number;
   moveSpeed: number;
   aimYaw: number;
+  /** Elite id when applicable */
+  eliteId?: string;
+  /** Seconds since death (for pool reclaim) */
+  deadFor: number;
+  interceptBias: number;
+  flankBias: number;
+  formationPull: number;
 }
 
 export interface EnemyHitResult {
@@ -158,16 +179,16 @@ function makeTurretMesh(mode: TurretMode = 'tracker'): THREE.Group {
   return g;
 }
 
-function makeDroneMesh(tint = 0xaa44ff): THREE.Group {
+function makeDroneMesh(tint = 0xaa44ff, elite = false): THREE.Group {
   const g = new THREE.Group();
   g.name = 'drone';
 
   const hull = new THREE.Mesh(
-    new THREE.OctahedronGeometry(1.1, 0),
+    new THREE.OctahedronGeometry(elite ? 1.35 : 1.1, 0),
     new THREE.MeshStandardMaterial({
-      color: 0x3a2850,
+      color: elite ? 0x4a3020 : 0x3a2850,
       emissive: tint,
-      emissiveIntensity: 0.55,
+      emissiveIntensity: elite ? 0.85 : 0.55,
       roughness: 0.4,
       metalness: 0.4,
       flatShading: true,
@@ -177,11 +198,11 @@ function makeDroneMesh(tint = 0xaa44ff): THREE.Group {
   g.add(hull);
 
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(1.4, 0.12, 6, 16),
+    new THREE.TorusGeometry(elite ? 1.7 : 1.4, elite ? 0.16 : 0.12, 6, 16),
     new THREE.MeshStandardMaterial({
       color: tint,
       emissive: tint,
-      emissiveIntensity: 0.9,
+      emissiveIntensity: elite ? 1.2 : 0.9,
       flatShading: true,
     }),
   );
@@ -191,7 +212,7 @@ function makeDroneMesh(tint = 0xaa44ff): THREE.Group {
 
   for (let i = 0; i < 4; i++) {
     const arm = new THREE.Mesh(
-      new THREE.BoxGeometry(0.18, 0.12, 1.6),
+      new THREE.BoxGeometry(0.18, 0.12, elite ? 1.9 : 1.6),
       new THREE.MeshStandardMaterial({
         color: 0x2a2038,
         emissive: tint,
@@ -206,7 +227,7 @@ function makeDroneMesh(tint = 0xaa44ff): THREE.Group {
 
   // Telegraph glow disc (hidden until windup)
   const telegraph = new THREE.Mesh(
-    new THREE.RingGeometry(1.6, 2.1, 16),
+    new THREE.RingGeometry(elite ? 2.0 : 1.6, elite ? 2.6 : 2.1, 16),
     new THREE.MeshBasicMaterial({
       color: tint,
       transparent: true,
@@ -319,6 +340,12 @@ export interface EnemyUpdateContext {
   onToast?: (message: string) => void;
 }
 
+interface PooledDroneMesh {
+  mesh: THREE.Group;
+  tint: number;
+  elite: boolean;
+}
+
 /**
  * Enemy targets + threats: AA turrets, supply depots (primary), role-driven drones.
  */
@@ -329,11 +356,25 @@ export class EnemySystem {
   private readonly effects: CombatEffects;
   private tmpDir = new THREE.Vector3();
   private tmpOrigin = new THREE.Vector3();
+  private tmpSlot = v3();
   private layoutOpts: EnemyLayoutOptions | null = null;
-  private encounterBeats: EncounterBeat[] = [];
-  private beatsFired = new Set<number>();
+  private waveSheet: WaveSpec[] = [];
+  private waveRuntime: WaveRuntimeState = createWaveRuntime();
+  private encounterBeats = compileWaveSpecs([]);
   private primariesDestroyed = 0;
   private reinforceRng = createRng(1);
+  private finaleFired = false;
+  private readonly droneMeshPool = new ObjectPool<PooledDroneMesh>(
+    () => ({ mesh: makeDroneMesh(), tint: 0xaa44ff, elite: false }),
+    {
+      maxSize: 24,
+      prewarm: 6,
+      reset: (item) => {
+        item.mesh.visible = false;
+        item.mesh.position.set(0, -999, 0);
+      },
+    },
+  );
 
   constructor(scene: THREE.Scene, weapons: WeaponSystem, effects: CombatEffects) {
     this.group.name = 'enemies';
@@ -392,7 +433,7 @@ export class EnemySystem {
       this.tmpDir.multiplyScalar(1 / dist);
       const dot = forward.dot(this.tmpDir);
       if (dot < coneDot) continue;
-      const score = dot * 2 - dist * 0.01 + (e.primary ? 0.15 : 0);
+      const score = dot * 2 - dist * 0.01 + (e.primary ? 0.15 : 0) + (e.eliteId ? 0.1 : 0);
       if (score > bestScore) {
         bestScore = score;
         best = e;
@@ -404,9 +445,11 @@ export class EnemySystem {
   spawnMission(opts: EnemyLayoutOptions) {
     this.clear();
     this.layoutOpts = opts;
-    this.encounterBeats = defaultEncounterBeats();
-    this.beatsFired.clear();
+    this.waveSheet = defaultWaveSheet();
+    this.encounterBeats = compileWaveSpecs(this.waveSheet);
+    resetWaveRuntime(this.waveRuntime);
     this.primariesDestroyed = 0;
+    this.finaleFired = false;
 
     const seed =
       opts.seed ??
@@ -495,6 +538,9 @@ export class EnemySystem {
           moveSpeed: profile.moveSpeed,
           formationId: d.formationId,
           formationSlot: d.formationSlot,
+          interceptBias: profile.interceptBias,
+          flankBias: profile.flankBias,
+          formationPull: profile.formationAffinity,
         },
       );
     }
@@ -505,9 +551,10 @@ export class EnemySystem {
    */
   spawnReinforcement(
     roles: DroneRole[],
-    formationKind: EncounterBeat['formation'],
+    formationKind: WaveSpec['formation'],
     heliPos: THREE.Vector3,
     _label?: string,
+    elite?: EliteProfile | null,
   ): number {
     if (!this.layoutOpts) return 0;
     const anchorFlat = pickReinforceSpawnAnchor(
@@ -519,13 +566,50 @@ export class EnemySystem {
     const height = ground + 22;
     const anchor = v3(anchorFlat.x, height, anchorFlat.z);
     const yaw = this.reinforceRng() * Math.PI * 2;
-    const layout = buildFormation(formationKind, roles.length, 12);
+    const total = roles.length + (elite ? 1 : 0);
+    const layout = buildFormation(formationKind, total, 12);
     const formationId = 1000 + this.enemies.length;
+    let spawned = 0;
+
+    if (elite) {
+      const base = getDroneRole(elite.baseRole);
+      const slot = layout.slots[0]!;
+      const pos = slotWorldPosition(anchor, yaw, slot.offset);
+      this.addEnemy('drone', new THREE.Vector3(pos.x, pos.y, pos.z), {
+        primary: false,
+        health: Math.round(base.health * elite.healthMul),
+        scoreValue: Math.round(base.scoreValue * elite.scoreMul),
+        fireCooldown: base.fireCooldown * 1.1,
+        orbitCenter: new THREE.Vector3(anchor.x, height, anchor.z),
+        orbitRadius: 14,
+        orbitHeight: height + slot.offset.y,
+        orbitAngle: yaw,
+        droneRole: elite.baseRole,
+        boltDamage: Math.round(base.boltDamage * elite.damageMul),
+        engageRange: base.engageRange,
+        minRange: base.minRange,
+        leadTime: base.leadTime,
+        telegraphDuration: base.telegraphDuration * elite.telegraphMul,
+        pursuitWeight: base.pursuitWeight,
+        evadeWeight: base.evadeWeight,
+        preferredRange: base.preferredRange,
+        moveSpeed: base.moveSpeed * 0.95,
+        formationId,
+        formationSlot: 0,
+        interceptBias: base.interceptBias,
+        flankBias: base.flankBias,
+        formationPull: elite.formationPull,
+        eliteId: elite.id,
+        tintOverride: elite.tint,
+      });
+      spawned++;
+    }
 
     for (let i = 0; i < roles.length; i++) {
       const role = roles[i]!;
       const profile = getDroneRole(role);
-      const slot = layout.slots[i] ?? layout.slots[0]!;
+      const slotIndex = elite ? i + 1 : i;
+      const slot = layout.slots[slotIndex] ?? layout.slots[0]!;
       const pos = slotWorldPosition(anchor, yaw, slot.offset);
       this.addEnemy('drone', new THREE.Vector3(pos.x, pos.y, pos.z), {
         primary: false,
@@ -547,38 +631,94 @@ export class EnemySystem {
         preferredRange: profile.preferredRange,
         moveSpeed: profile.moveSpeed,
         formationId,
-        formationSlot: i,
+        formationSlot: slotIndex,
+        interceptBias: profile.interceptBias,
+        flankBias: profile.flankBias,
+        formationPull: profile.formationAffinity,
       });
+      spawned++;
     }
-    return roles.length;
+    return spawned;
   }
 
   /**
    * Tick encounter pacing beats (scripted waves). Returns toast label if any.
+   * Pressure / threat-budget aware via wave sheet gates.
    */
   tickEncounterPacing(elapsed: number, director?: DirectorSnapshot): string | null {
-    // Scripted beats skip only during opening grace; breathers still allow authored waves.
-    if (director?.beat === 'grace') return null;
+    const blocked = director?.beat === 'grace';
 
-    for (let i = 0; i < this.encounterBeats.length; i++) {
-      if (this.beatsFired.has(i)) continue;
-      const beat = this.encounterBeats[i]!;
-      const timeReady = elapsed >= beat.atTime;
-      const objReady = this.primariesDestroyed >= beat.afterPrimariesDestroyed;
-      // Fire when either time or objective gate is met (whichever comes first after grace)
-      if (!timeReady && !objReady) continue;
-
-      this.beatsFired.add(i);
-      return beat.label;
+    // Finale elite encounter (once)
+    if (
+      !this.finaleFired &&
+      shouldReleaseFinale({
+        beat: director?.beat ?? 'probe',
+        primariesDestroyed: this.primariesDestroyed,
+        primaryTotal: this.primaryTotal,
+        elapsed,
+        alreadyFired: this.finaleFired,
+      }) &&
+      !blocked
+    ) {
+      this.finaleFired = true;
+      markWaveFired(this.waveRuntime, { id: 'finale-wing' } as WaveSpec);
+      return 'FINALE WING';
     }
-    return null;
+
+    const next = pickNextWave(this.waveSheet, this.waveRuntime, {
+      elapsed,
+      primariesDestroyed: this.primariesDestroyed,
+      pressure: director?.pressure ?? 0.4,
+      aliveThreats: this.aliveThreats,
+      blocked: !!blocked,
+    });
+    if (!next) return null;
+    markWaveFired(this.waveRuntime, next);
+    return next.label;
   }
 
   /** Fire the beat at index (used after tickEncounterPacing returns a label). */
   releaseEncounterBeat(label: string, heliPos: THREE.Vector3): number {
+    if (label === 'FINALE WING') {
+      const pack = finaleEliteRoles();
+      const elite = getEliteProfile(pack.eliteId);
+      return this.spawnReinforcement(pack.wingmen, 'diamond', heliPos, label, elite);
+    }
+    const wave = this.waveSheet.find((b) => b.label === label);
+    if (wave) {
+      return this.spawnReinforcement(wave.roles, wave.formation, heliPos, label);
+    }
     const beat = this.encounterBeats.find((b) => b.label === label);
     if (!beat) return 0;
     return this.spawnReinforcement(beat.droneRoles, beat.formation, heliPos, label);
+  }
+
+  private acquireDroneMesh(tint: number, elite: boolean): THREE.Group {
+    // Prefer pooled mesh of matching elite flag; else create fresh
+    const pooled = this.droneMeshPool.acquire();
+    if (pooled.tint === tint && pooled.elite === elite && pooled.mesh.children.length > 0) {
+      pooled.mesh.visible = true;
+      return pooled.mesh;
+    }
+    // Mismatch — dispose pooled placeholder and build correct mesh
+    if (pooled.mesh.parent) this.group.remove(pooled.mesh);
+    disposeObject(pooled.mesh);
+    const mesh = makeDroneMesh(tint, elite);
+    pooled.mesh = mesh;
+    pooled.tint = tint;
+    pooled.elite = elite;
+    return mesh;
+  }
+
+  private releaseDroneMesh(enemy: Enemy) {
+    if (enemy.kind !== 'drone') return;
+    if (enemy.mesh.parent) this.group.remove(enemy.mesh);
+    enemy.mesh.visible = false;
+    this.droneMeshPool.release({
+      mesh: enemy.mesh,
+      tint: enemy.droneRole ? getDroneRole(enemy.droneRole).tint : 0xaa44ff,
+      elite: !!enemy.eliteId,
+    });
   }
 
   private addEnemy(
@@ -610,6 +750,11 @@ export class EnemySystem {
       moveSpeed?: number;
       formationId?: number;
       formationSlot?: number;
+      interceptBias?: number;
+      flankBias?: number;
+      formationPull?: number;
+      eliteId?: string;
+      tintOverride?: number;
     },
   ) {
     let mesh: THREE.Group;
@@ -618,15 +763,18 @@ export class EnemySystem {
       mesh = makeTurretMesh(opts.turretMode ?? 'tracker');
       radius = 2.4;
     } else if (kind === 'drone') {
-      const tint = opts.droneRole ? getDroneRole(opts.droneRole).tint : 0xaa44ff;
-      mesh = makeDroneMesh(tint);
-      radius = 1.8;
+      const tint =
+        opts.tintOverride ??
+        (opts.droneRole ? getDroneRole(opts.droneRole).tint : 0xaa44ff);
+      mesh = this.acquireDroneMesh(tint, !!opts.eliteId);
+      radius = opts.eliteId ? 2.2 : 1.8;
     } else {
       mesh = makeDepotMesh();
       radius = 2.8;
     }
 
     mesh.position.copy(position);
+    mesh.visible = true;
     this.group.add(mesh);
 
     const beacon =
@@ -677,6 +825,11 @@ export class EnemySystem {
       preferredRange: opts.preferredRange ?? 30,
       moveSpeed: opts.moveSpeed ?? 1,
       aimYaw: 0,
+      eliteId: opts.eliteId,
+      deadFor: 0,
+      interceptBias: opts.interceptBias ?? 0,
+      flankBias: opts.flankBias ?? 0,
+      formationPull: opts.formationPull ?? 0,
     };
     this.enemies.push(enemy);
   }
@@ -693,7 +846,16 @@ export class EnemySystem {
     const fireRateMul = ctx.director?.fireRateMul ?? 1;
 
     for (const enemy of this.enemies) {
-      if (!enemy.alive) continue;
+      // Soft reclaim of dead drone meshes into pool
+      if (!enemy.alive) {
+        if (enemy.kind === 'drone' && enemy.mesh.parent) {
+          enemy.deadFor += dt;
+          if (shouldReclaimCorpse(enemy.deadFor, 2.2)) {
+            this.releaseDroneMesh(enemy);
+          }
+        }
+        continue;
+      }
 
       if (enemy.underFireTimer > 0) {
         enemy.underFireTimer = Math.max(0, enemy.underFireTimer - dt);
@@ -712,8 +874,21 @@ export class EnemySystem {
         });
       }
 
-      // --- Drone movement (roles / pursuit / evasion / formations) ---
+      // --- Drone movement (roles / pursuit / evasion / formations / intercept) ---
       if (enemy.kind === 'drone') {
+        let formationSlot = null as ReturnType<typeof formationSlotWorld> | null;
+        if (enemy.orbitCenter && enemy.formationPull > 0.2) {
+          formationSlot = formationSlotWorld(
+            v3(enemy.orbitCenter.x, enemy.orbitCenter.y, enemy.orbitCenter.z),
+            enemy.orbitAngle,
+            enemy.orbitRadius,
+            enemy.orbitHeight,
+            enemy.formationSlot,
+            8,
+            this.tmpSlot,
+          );
+        }
+
         const steered = steerDrone({
           position: v3(enemy.position.x, enemy.position.y, enemy.position.z),
           target: v3(heliPos.x, heliPos.y, heliPos.z),
@@ -721,12 +896,17 @@ export class EnemySystem {
           anchor: enemy.orbitCenter
             ? v3(enemy.orbitCenter.x, enemy.orbitCenter.y, enemy.orbitCenter.z)
             : null,
+          formationSlot,
+          formationPull: enemy.formationPull,
           preferredRange: enemy.preferredRange,
           moveSpeed: enemy.moveSpeed,
           pursuitWeight: enemy.pursuitWeight,
           evadeWeight: enemy.evadeWeight,
           aggression,
           underFire: enemy.underFireTimer > 0,
+          healthRatio: enemy.health / enemy.maxHealth,
+          interceptBias: enemy.interceptBias,
+          flankBias: enemy.flankBias,
           dt,
           time,
           id: enemy.id,
@@ -740,14 +920,14 @@ export class EnemySystem {
         enemy.mesh.position.copy(enemy.position);
         enemy.mesh.rotation.y = steered.yaw;
         const ring = enemy.mesh.getObjectByName('drone-ring');
-        if (ring) ring.rotation.z = time * 3.2;
+        if (ring) ring.rotation.z = time * (enemy.eliteId ? 4.2 : 3.2);
 
-        // Telegraph ring visual
+        // Telegraph ring visual — readable windup cue
         const tel = enemy.mesh.getObjectByName('drone-telegraph') as THREE.Mesh | undefined;
         if (tel) {
           const mat = tel.material as THREE.MeshBasicMaterial;
-          mat.opacity = enemy.telegraph.intensity * 0.85;
-          tel.scale.setScalar(1 + enemy.telegraph.intensity * 0.35);
+          mat.opacity = enemy.telegraph.intensity * (enemy.eliteId ? 1.0 : 0.85);
+          tel.scale.setScalar(1 + enemy.telegraph.intensity * (enemy.eliteId ? 0.55 : 0.35));
         }
       }
 
@@ -822,12 +1002,30 @@ export class EnemySystem {
       this.tmpOrigin.copy(enemy.position);
       this.tmpOrigin.y += enemy.kind === 'drone' ? 0.5 : 1.4;
 
-      const aim = aimWithLead(
-        v3(this.tmpOrigin.x, this.tmpOrigin.y, this.tmpOrigin.z),
-        v3(heliPos.x, heliPos.y, heliPos.z),
-        v3(heliVel.x, heliVel.y, heliVel.z),
-        enemy.leadTime,
-      );
+      let aim;
+      if (enemy.kind === 'turret' && enemy.turretMode === 'flak') {
+        aim = aimFlak(
+          v3(this.tmpOrigin.x, this.tmpOrigin.y, this.tmpOrigin.z),
+          v3(heliPos.x, heliPos.y, heliPos.z),
+          v3(heliVel.x, heliVel.y, heliVel.z),
+          enemy.leadTime,
+          time,
+          enemy.id,
+        );
+      } else {
+        // Fair lead with slight miss cone — dodgeable after telegraph
+        const miss =
+          enemy.turretMode === 'sweep' ? 0.55 : enemy.turretMode === 'burst' ? 0.4 : 0.32;
+        aim = aimFair(
+          v3(this.tmpOrigin.x, this.tmpOrigin.y, this.tmpOrigin.z),
+          v3(heliPos.x, heliPos.y, heliPos.z),
+          v3(heliVel.x, heliVel.y, heliVel.z),
+          enemy.leadTime,
+          time,
+          enemy.id,
+          miss,
+        );
+      }
 
       if (enemy.kind === 'turret' && enemy.turretMode === 'sweep') {
         // Align bolt to turret aim yaw (sweep already baked into aimYaw)
@@ -879,13 +1077,18 @@ export class EnemySystem {
 
         if (enemy.health <= 0) {
           enemy.alive = false;
+          enemy.deadFor = 0;
           enemy.mesh.visible = false;
           if (enemy.primary) this.primariesDestroyed += 1;
           this.effects.spawnExplosion(
             bodyPos.clone(),
-            enemy.kind === 'depot' ? 2.0 : 1.25,
+            enemy.kind === 'depot' ? 2.0 : enemy.eliteId ? 1.7 : 1.25,
             enemy.kind === 'drone'
-              ? (enemy.droneRole ? getDroneRole(enemy.droneRole).tint : 0xaa44ff)
+              ? (enemy.eliteId
+                  ? (getEliteProfile(enemy.eliteId)?.tint ?? 0xffdd44)
+                  : enemy.droneRole
+                    ? getDroneRole(enemy.droneRole).tint
+                    : 0xaa44ff)
               : COLORS.orangeHot,
           );
           results.push({
@@ -914,7 +1117,7 @@ export class EnemySystem {
         this.tmpOrigin.set(enemy.position.x, bodyY, enemy.position.z),
       );
       if (d < enemy.radius + 1.5) {
-        damage = Math.max(damage, enemy.kind === 'depot' ? 18 : 12);
+        damage = Math.max(damage, enemy.kind === 'depot' ? 18 : enemy.eliteId ? 16 : 12);
       }
     }
     return damage;
@@ -922,12 +1125,17 @@ export class EnemySystem {
 
   clear() {
     for (const enemy of this.enemies) {
-      this.group.remove(enemy.mesh);
-      disposeObject(enemy.mesh);
+      if (enemy.kind === 'drone') {
+        this.releaseDroneMesh(enemy);
+      } else {
+        this.group.remove(enemy.mesh);
+        disposeObject(enemy.mesh);
+      }
     }
     this.enemies.length = 0;
-    this.beatsFired.clear();
+    resetWaveRuntime(this.waveRuntime);
     this.primariesDestroyed = 0;
+    this.finaleFired = false;
   }
 
   reset(opts: EnemyLayoutOptions) {

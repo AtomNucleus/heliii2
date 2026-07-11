@@ -19,6 +19,8 @@ export type {
   DirectorSnapshot,
   TelegraphPhase,
   MoveIntent,
+  WaveSpec,
+  EliteProfile,
 } from './ai';
 export {
   DifficultyDirector,
@@ -32,4 +34,9 @@ export {
   createTelegraphState,
   steerDrone,
   reinforceWaveSize,
+  pickReinforceRoles,
+  reinforceFormationForPressure,
+  defaultWaveSheet,
+  aimFair,
+  aimFlak,
 } from './ai';

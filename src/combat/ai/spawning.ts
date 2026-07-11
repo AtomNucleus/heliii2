@@ -286,6 +286,13 @@ export function defaultEncounterBeats(): EncounterBeat[] {
       droneRoles: ['striker', 'striker', 'interceptor', 'scout'],
       formation: 'diamond',
     },
+    {
+      atTime: 180,
+      afterPrimariesDestroyed: 3,
+      label: 'FINALE WING',
+      droneRoles: ['striker', 'interceptor', 'gunship', 'escort', 'scout'],
+      formation: 'diamond',
+    },
   ];
 }
 

@@ -1,3 +1,14 @@
+/**
+ * Combat AI public surface.
+ *
+ * API notes (combat-AI upgrade):
+ * - MoveIntent gained 'formation' | 'intercept' | 'flank'
+ * - SteeringInput gained formationSlot, formationPull, healthRatio, interceptBias, flankBias
+ * - New modules: waves, elite, pool; pursuit adds aimFlak / aimFair / formationSlotWorld
+ * - EnemySystem public methods preserved; tickEncounterPacing now pressure/budget-aware
+ * - Enemy gained optional eliteId, deadFor, interceptBias, flankBias, formationPull
+ */
+
 export { createRng, hashSeed, rngFloat, rngInt, rngPick, rngShuffle } from './rng';
 export type { Rng } from './rng';
 
@@ -28,7 +39,14 @@ export {
 } from './formations';
 export type { FormationKind, FormationLayout, FormationSlot } from './formations';
 
-export { steerDrone, aimWithLead, shouldEvade } from './pursuit';
+export {
+  steerDrone,
+  aimWithLead,
+  aimFlak,
+  aimFair,
+  shouldEvade,
+  formationSlotWorld,
+} from './pursuit';
 export type { MoveIntent, SteeringInput, SteeringResult } from './pursuit';
 
 export {
@@ -72,3 +90,39 @@ export type {
   EncounterBeat,
   EncounterPlanOptions,
 } from './spawning';
+
+export {
+  ROLE_PACKS,
+  rolePack,
+  compileWaveSpecs,
+  defaultWaveSheet,
+  createWaveRuntime,
+  resetWaveRuntime,
+  evaluateWaveGate,
+  pickNextWave,
+  markWaveFired,
+  pickReinforceRoles,
+  reinforceFormationForPressure,
+  shouldReclaimCorpse,
+} from './waves';
+export type {
+  WaveSpec,
+  WaveReleaseDecision,
+  WaveRuntimeState,
+} from './waves';
+
+export {
+  ELITE_PROFILES,
+  getEliteProfile,
+  finaleWaveSpec,
+  finaleEliteRoles,
+  shouldReleaseFinale,
+} from './elite';
+export type { EliteProfile } from './elite';
+
+export {
+  ObjectPool,
+  createVec3Pool,
+  createEnemySlotPool,
+} from './pool';
+export type { PoolStats, EnemySlotHandle } from './pool';

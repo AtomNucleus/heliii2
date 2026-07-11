@@ -28,6 +28,10 @@ export interface DroneRoleProfile {
   evadeWeight: number;
   /** Formation slot preference bias */
   formationAffinity: number;
+  /** Cut ahead of player velocity (0–1) */
+  interceptBias: number;
+  /** Wide flanking arcs (0–1) */
+  flankBias: number;
 }
 
 export const DRONE_ROLES: Record<DroneRole, DroneRoleProfile> = {
@@ -47,6 +51,8 @@ export const DRONE_ROLES: Record<DroneRole, DroneRoleProfile> = {
     pursuitWeight: 0.9,
     evadeWeight: 0.35,
     formationAffinity: 0.4,
+    interceptBias: 0.9,
+    flankBias: 0.25,
   },
   gunship: {
     role: 'gunship',
@@ -64,6 +70,8 @@ export const DRONE_ROLES: Record<DroneRole, DroneRoleProfile> = {
     pursuitWeight: 0.45,
     evadeWeight: 0.25,
     formationAffinity: 0.55,
+    interceptBias: 0.15,
+    flankBias: 0.2,
   },
   scout: {
     role: 'scout',
@@ -81,6 +89,8 @@ export const DRONE_ROLES: Record<DroneRole, DroneRoleProfile> = {
     pursuitWeight: 0.25,
     evadeWeight: 0.85,
     formationAffinity: 0.2,
+    interceptBias: 0.2,
+    flankBias: 0.65,
   },
   escort: {
     role: 'escort',
@@ -98,6 +108,8 @@ export const DRONE_ROLES: Record<DroneRole, DroneRoleProfile> = {
     pursuitWeight: 0.55,
     evadeWeight: 0.5,
     formationAffinity: 0.85,
+    interceptBias: 0.3,
+    flankBias: 0.35,
   },
   striker: {
     role: 'striker',
@@ -115,6 +127,8 @@ export const DRONE_ROLES: Record<DroneRole, DroneRoleProfile> = {
     pursuitWeight: 0.75,
     evadeWeight: 0.4,
     formationAffinity: 1,
+    interceptBias: 0.55,
+    flankBias: 0.75,
   },
 };
 
