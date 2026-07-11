@@ -179,8 +179,6 @@ function animate() {
     altitude,
     getGroundHeight: world.getGroundHeight,
   });
-  // Keep env density in sync with adaptive quality tier
-  world.environment?.applyQuality(fx.quality.current);
   hud.tick(dt);
 
   // Soft follow shadow camera on heli — wider frustum for Fruzer map
@@ -363,7 +361,10 @@ async function boot() {
     world.environment?.applyQuality(fx.quality.current);
     mission.setEffectsCamera(camera);
     mission.applyQuality(fx.quality.current);
-    fx.quality.onChange((q) => mission.applyQuality(q));
+    fx.quality.onChange((quality) => {
+      mission.applyQuality(quality);
+      world.environment?.applyQuality(quality);
+    });
     mission.onRespawn = (pos) => {
       controller.reset(pos);
       controller.enabled = true;
