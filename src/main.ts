@@ -7,7 +7,7 @@ import { HelicopterController } from './helicopter/controller';
 import { CheckpointSystem } from './rings/checkpoints';
 import { HUD } from './hud/hud';
 import { MobileControls } from './hud/mobileControls';
-import { createPostProcessing, ExhaustParticles } from './effects/postprocessing';
+import { VisualEffects } from './effects/visualEffects';
 
 type GamePhase = 'loading' | 'start' | 'playing' | 'complete';
 
@@ -19,16 +19,16 @@ const restartBtn = document.getElementById('restart-btn')!;
 const finalTimeEl = document.getElementById('final-time')!;
 const loadingStatus = document.getElementById('loading-status');
 
-const { scene, camera, renderer, sunLight } = createSceneSetup(canvas);
+const sceneSetup = createSceneSetup(canvas);
+const { scene, camera, sunLight } = sceneSetup;
+const fx = new VisualEffects(sceneSetup);
 
 let world: WorldObjects;
 let controller: HelicopterController;
 let checkpoints: CheckpointSystem;
 let hud: HUD;
 let heli: THREE.Group;
-let exhaust: ExhaustParticles;
 let mobileControls: MobileControls;
-const { composer } = createPostProcessing(renderer, scene, camera);
 
 let phase: GamePhase = 'loading';
 let elapsed = 0;
@@ -46,6 +46,7 @@ function startGame() {
   checkpoints.reset();
   controller.reset(world.spawnPosition);
   controller.enabled = true;
+  fx.resetTrail();
   startOverlay.classList.add('hidden');
   completeOverlay.classList.add('hidden');
   hud.show();
@@ -91,14 +92,25 @@ function animate() {
   const time = clock.elapsedTime;
 
   if (!ready) {
-    composer.render();
+    fx.render();
     return;
   }
 
   controller.update(dt);
   checkpoints.update(time);
   if (world.water) updateWater(world.water, time);
-  exhaust.update(dt, heli.position, heli.quaternion, controller.getSpeed());
+
+  const speed = controller.getSpeed();
+  const altitude = controller.getAltitude();
+
+  fx.update({
+    dt,
+    heliPos: heli.position,
+    heliQuat: heli.quaternion,
+    speed,
+    altitude,
+    getGroundHeight: world.getGroundHeight,
+  });
 
   // Soft follow shadow camera on heli — wider frustum for Fruzer map
   const shadowReach = Math.max(120, world.mapHalfExtent * 0.9);
@@ -119,14 +131,14 @@ function animate() {
   if (phase === 'playing') {
     elapsed += dt;
     checkpoints.tryCollect(heli.position);
-    hud.update(elapsed, controller.getSpeed(), controller.getAltitude(), checkpoints.collectedCount);
+    hud.update(elapsed, speed, altitude, checkpoints.collectedCount);
 
     if (checkpoints.complete) {
       completeGame();
     }
   }
 
-  composer.render();
+  fx.render();
 }
 
 clock.start();
@@ -141,6 +153,9 @@ async function boot() {
       const pct = Math.round(ratio * 100);
       setLoadingText(`Loading Fruzer Polygon map… ${pct}%`);
     });
+
+    sceneSetup.attachSky(world.sky);
+    sceneSetup.attachSunDisc(world.sunDisc);
 
     setLoadingText('Loading helicopter…');
     heli = await loadHelicopter();
@@ -160,7 +175,6 @@ async function boot() {
     );
     checkpoints = new CheckpointSystem(scene, ringLayout);
     hud = new HUD(checkpoints.total);
-    exhaust = new ExhaustParticles(scene);
     mobileControls = new MobileControls({
       setInput: (input) => controller.setTouchInput(input),
       clearInput: () => controller.clearTouchInput(),

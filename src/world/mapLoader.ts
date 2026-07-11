@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import { COLORS } from '../scene/setup';
+import { COLORS, createSunsetSkyDome, createSunDisc } from '../scene/setup';
 
 /** Target play-area width (largest XZ extent after scale), in world units */
 export const MAP_TARGET_SIZE = 260;
@@ -24,88 +24,18 @@ export interface WorldObjects {
   /** Half-extent of playable XZ after scale (approx) */
   mapHalfExtent: number;
   bounds: THREE.Box3;
+  /** Cinematic sky dome (for atmosphere uniform updates) */
+  sky: THREE.Mesh;
+  /** Procedural sun disc + flare */
+  sunDisc: THREE.Group;
 }
 
 function createSkyDome(): THREE.Mesh {
-  const geo = new THREE.SphereGeometry(400, 32, 16);
-  const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    depthWrite: false,
-    uniforms: {
-      topColor: { value: new THREE.Color(COLORS.skyTop) },
-      midColor: { value: new THREE.Color(0x5a3a50) },
-      horizonColor: { value: new THREE.Color(COLORS.skyHorizon) },
-      bottomColor: { value: new THREE.Color(COLORS.tealDeep) },
-    },
-    vertexShader: /* glsl */ `
-      varying vec3 vWorldPos;
-      void main() {
-        vec4 world = modelMatrix * vec4(position, 1.0);
-        vWorldPos = world.xyz;
-        gl_Position = projectionMatrix * viewMatrix * world;
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform vec3 topColor;
-      uniform vec3 midColor;
-      uniform vec3 horizonColor;
-      uniform vec3 bottomColor;
-      varying vec3 vWorldPos;
-      void main() {
-        float h = normalize(vWorldPos).y;
-        vec3 col;
-        if (h > 0.15) {
-          float t = clamp((h - 0.15) / 0.85, 0.0, 1.0);
-          col = mix(midColor, topColor, t);
-        } else if (h > -0.05) {
-          float t = clamp((h + 0.05) / 0.2, 0.0, 1.0);
-          col = mix(horizonColor, midColor, t);
-        } else {
-          float t = clamp((h + 0.4) / 0.35, 0.0, 1.0);
-          col = mix(bottomColor, horizonColor, t);
-        }
-        gl_FragColor = vec4(col, 1.0);
-      }
-    `,
-  });
-  const sky = new THREE.Mesh(geo, mat);
-  sky.name = 'sky';
-  return sky;
+  return createSunsetSkyDome(520);
 }
 
 function createSun(): THREE.Group {
-  const group = new THREE.Group();
-  group.position.set(90, 38, -70);
-
-  const sun = new THREE.Mesh(
-    new THREE.SphereGeometry(12, 16, 16),
-    new THREE.MeshBasicMaterial({ color: COLORS.orangeSun }),
-  );
-  group.add(sun);
-
-  const glow = new THREE.Mesh(
-    new THREE.SphereGeometry(18, 16, 16),
-    new THREE.MeshBasicMaterial({
-      color: COLORS.orangeGlow,
-      transparent: true,
-      opacity: 0.35,
-      depthWrite: false,
-    }),
-  );
-  group.add(glow);
-
-  const halo = new THREE.Mesh(
-    new THREE.SphereGeometry(28, 16, 16),
-    new THREE.MeshBasicMaterial({
-      color: 0xffaa66,
-      transparent: true,
-      opacity: 0.12,
-      depthWrite: false,
-    }),
-  );
-  group.add(halo);
-
-  return group;
+  return createSunDisc();
 }
 
 function createLandingPad(): THREE.Group {
@@ -565,8 +495,10 @@ export async function loadMapWorld(
   const group = new THREE.Group();
   group.name = 'world';
 
-  scene.add(createSkyDome());
-  scene.add(createSun());
+  const sky = createSkyDome();
+  const sunDisc = createSun();
+  scene.add(sky);
+  scene.add(sunDisc);
 
   const mapRoot = gltf.scene;
   mapRoot.name = 'fruzerPolygon';
@@ -707,6 +639,8 @@ export async function loadMapWorld(
     getGroundHeight,
     mapHalfExtent,
     bounds,
+    sky,
+    sunDisc,
   };
 }
 

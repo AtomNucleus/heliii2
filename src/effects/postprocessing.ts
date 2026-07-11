@@ -2,106 +2,184 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { COLORS } from '../scene/setup';
+import { RGBShiftShader } from 'three/examples/jsm/shaders/RGBShiftShader.js';
+import { VignetteShader } from 'three/examples/jsm/shaders/VignetteShader.js';
+import type { QualitySettings } from './quality';
+
+/** Sunset cinematic grade — warm midtones, teal shadows, soft contrast. */
+const SunsetGradeShader = {
+  name: 'SunsetGradeShader',
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    warmth: { value: 0.12 },
+    contrast: { value: 1.06 },
+    saturation: { value: 1.08 },
+    tealLift: { value: 0.04 },
+    vignetteMix: { value: 0 },
+    speedPunch: { value: 0 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float warmth;
+    uniform float contrast;
+    uniform float saturation;
+    uniform float tealLift;
+    uniform float speedPunch;
+    varying vec2 vUv;
+
+    void main() {
+      vec4 tex = texture2D(tDiffuse, vUv);
+      vec3 col = tex.rgb;
+
+      // Soft contrast around mid-gray
+      col = (col - 0.5) * contrast + 0.5;
+
+      float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col = mix(vec3(luma), col, saturation);
+
+      // Warm highlights / teal shadow split
+      float shadowMask = 1.0 - smoothstep(0.15, 0.55, luma);
+      float highlightMask = smoothstep(0.45, 0.9, luma);
+      col += vec3(warmth, warmth * 0.45, -warmth * 0.25) * highlightMask;
+      col += vec3(-tealLift * 0.4, tealLift * 0.55, tealLift) * shadowMask;
+
+      // High-speed desat + slight crush for urgency
+      col = mix(col, vec3(luma) * vec3(1.05, 0.95, 0.88), speedPunch * 0.18);
+      col *= 1.0 + speedPunch * 0.04;
+
+      gl_FragColor = vec4(clamp(col, 0.0, 1.2), tex.a);
+    }
+  `,
+};
+
+export interface PostProcessingHandle {
+  composer: EffectComposer;
+  bloom: UnrealBloomPass;
+  vignette: ShaderPass;
+  rgbShift: ShaderPass;
+  film: FilmPass;
+  grade: ShaderPass;
+  /** 0..1 flight intensity — drives chromatic aberration & vignette punch */
+  setSpeedIntensity: (t: number) => void;
+  applyQuality: (q: QualitySettings) => void;
+  update: (dt: number) => void;
+  onResize: () => void;
+  render: () => void;
+}
 
 export function createPostProcessing(
   renderer: THREE.WebGLRenderer,
   scene: THREE.Scene,
   camera: THREE.Camera,
-) {
+): PostProcessingHandle {
+  const size = new THREE.Vector2();
+  renderer.getSize(size);
+
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
 
   const bloom = new UnrealBloomPass(
-    new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.18, // strength — keep Fruzer albedo readable
-    0.35, // radius
-    0.92, // threshold — only bright emissives / exhaust bloom
+    new THREE.Vector2(size.x, size.y),
+    0.18,
+    0.42,
+    0.88,
   );
   composer.addPass(bloom);
+
+  const grade = new ShaderPass(SunsetGradeShader);
+  composer.addPass(grade);
+
+  const vignette = new ShaderPass(VignetteShader);
+  vignette.uniforms['offset'].value = 1.15;
+  vignette.uniforms['darkness'].value = 1.05;
+  composer.addPass(vignette);
+
+  const rgbShift = new ShaderPass(RGBShiftShader);
+  rgbShift.uniforms['amount'].value = 0.0004;
+  rgbShift.uniforms['angle'].value = 0;
+  composer.addPass(rgbShift);
+
+  // FilmPass(intensity, grayscale) — r170 API
+  const film = new FilmPass(0.28, false);
+  film.enabled = false;
+  composer.addPass(film);
+
   composer.addPass(new OutputPass());
+
+  let speedIntensity = 0;
+  let qualityScale = 1;
+  let filmTime = 0;
+
+  const setSpeedIntensity = (t: number) => {
+    speedIntensity = THREE.MathUtils.clamp(t, 0, 1);
+  };
+
+  const applyQuality = (q: QualitySettings) => {
+    qualityScale = q.composerScale;
+    bloom.enabled = q.bloomEnabled;
+    bloom.strength = q.bloomStrength;
+    grade.enabled = q.colorGrade;
+    vignette.enabled = q.vignette;
+    rgbShift.enabled = q.chromaticAberration;
+    film.enabled = q.filmGrain;
+    onResize();
+  };
+
+  const update = (dt: number) => {
+    filmTime += dt;
+    const punch = speedIntensity * speedIntensity;
+
+    vignette.uniforms['offset'].value = 1.12 + punch * 0.18;
+    vignette.uniforms['darkness'].value = 1.0 + punch * 0.35;
+
+    if (grade.enabled) {
+      grade.uniforms['speedPunch'].value = punch;
+      grade.uniforms['warmth'].value = 0.1 + punch * 0.06;
+    }
+
+    if (rgbShift.enabled) {
+      rgbShift.uniforms['amount'].value = 0.00035 + punch * 0.0028;
+      rgbShift.uniforms['angle'].value = filmTime * 0.15;
+    }
+
+    if (film.enabled) {
+      const u = film.uniforms as Record<string, { value: number }>;
+      if (u.intensity) u.intensity.value = 0.18 + punch * 0.2;
+    }
+  };
 
   const onResize = () => {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    composer.setSize(w, h);
-    bloom.resolution.set(w, h);
+    const sw = Math.max(1, Math.floor(w * qualityScale));
+    const sh = Math.max(1, Math.floor(h * qualityScale));
+    composer.setSize(sw, sh);
+    bloom.resolution.set(sw, sh);
   };
   window.addEventListener('resize', onResize);
   onResize();
 
-  return { composer, bloom, onResize };
-}
-
-/** Trail particles behind the helicopter */
-export class ExhaustParticles {
-  readonly points: THREE.Points;
-  private positions: Float32Array;
-  private velocities: Float32Array;
-  private life: Float32Array;
-  private readonly count = 80;
-
-  constructor(scene: THREE.Scene) {
-    this.positions = new Float32Array(this.count * 3);
-    this.velocities = new Float32Array(this.count * 3);
-    this.life = new Float32Array(this.count);
-
-    for (let i = 0; i < this.count; i++) {
-      this.life[i] = Math.random();
-      this.positions[i * 3 + 1] = -100;
-    }
-
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-
-    const mat = new THREE.PointsMaterial({
-      color: COLORS.orangeGlow,
-      size: 0.35,
-      transparent: true,
-      opacity: 0.65,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-
-    this.points = new THREE.Points(geo, mat);
-    this.points.frustumCulled = false;
-    scene.add(this.points);
-  }
-
-  update(dt: number, heliPos: THREE.Vector3, heliQuat: THREE.Quaternion, speed: number) {
-    const back = new THREE.Vector3(0, 0, -1).applyQuaternion(heliQuat).normalize();
-    const emitPos = heliPos.clone().addScaledVector(back, 1.2);
-    emitPos.y -= 0.2;
-
-    const rate = 0.02 + speed * 0.002;
-
-    for (let i = 0; i < this.count; i++) {
-      this.life[i] -= dt * (0.8 + Math.random());
-      if (this.life[i] <= 0 && Math.random() < rate * 10) {
-        this.life[i] = 1;
-        this.positions[i * 3] = emitPos.x + (Math.random() - 0.5) * 0.4;
-        this.positions[i * 3 + 1] = emitPos.y + (Math.random() - 0.5) * 0.3;
-        this.positions[i * 3 + 2] = emitPos.z + (Math.random() - 0.5) * 0.4;
-        this.velocities[i * 3] = back.x * (2 + Math.random() * 3) + (Math.random() - 0.5);
-        this.velocities[i * 3 + 1] = 0.5 + Math.random() * 1.5;
-        this.velocities[i * 3 + 2] = back.z * (2 + Math.random() * 3) + (Math.random() - 0.5);
-      }
-
-      if (this.life[i] > 0) {
-        this.positions[i * 3] += this.velocities[i * 3] * dt;
-        this.positions[i * 3 + 1] += this.velocities[i * 3 + 1] * dt;
-        this.positions[i * 3 + 2] += this.velocities[i * 3 + 2] * dt;
-        this.velocities[i * 3 + 1] += 2 * dt;
-      } else {
-        this.positions[i * 3 + 1] = -100;
-      }
-    }
-
-    const attr = this.points.geometry.attributes.position as THREE.BufferAttribute;
-    attr.needsUpdate = true;
-
-    const mat = this.points.material as THREE.PointsMaterial;
-    mat.opacity = 0.35 + Math.min(0.4, speed / 40);
-  }
+  return {
+    composer,
+    bloom,
+    vignette,
+    rgbShift,
+    film,
+    grade,
+    setSpeedIntensity,
+    applyQuality,
+    update,
+    onResize,
+    render: () => composer.render(),
+  };
 }
