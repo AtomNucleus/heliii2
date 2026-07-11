@@ -1,0 +1,41 @@
+{
+  "name": "heli-sunset",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "format:check": "prettier --check .",
+    "test": "npm run test:unit && npm run test:verify",
+    "test:unit": "tsx --test src/combat/ai/ai.test.ts src/effects/quality.test.ts src/render/preference.test.ts src/physics/physics.test.ts src/pwa/policy.test.ts src/profile/profile.test.ts src/utils/withTimeout.test.ts src/world/mapLoader.test.ts",
+    "test:profile": "tsx --test src/profile/profile.test.ts",
+    "test:pwa": "tsx --test src/pwa/policy.test.ts",
+    "test:ai": "tsx --test src/combat/ai/ai.test.ts",
+    "test:render": "tsx --test src/render/preference.test.ts",
+    "test:physics": "tsx --test src/physics/physics.test.ts",
+    "test:collision": "node scripts/verify-collision.mjs",
+    "test:mission": "node scripts/verify-mission.mjs",
+    "test:verify": "npm run test:collision && npm run test:mission",
+    "smoke-test": "playwright test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
+    "@types/three": "0.185.1",
+    "eslint": "^10.7.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.5",
+    "tsx": "^4.23.0",
+    "typescript": "~5.6.3",
+    "typescript-eslint": "^8.63.0",
+    "vite": "^6.0.3",
+    "vite-plugin-pwa": "^1.3.0"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3",
+    "three": "0.185.1"
+  }
+}
