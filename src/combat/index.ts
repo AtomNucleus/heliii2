@@ -10,4 +10,26 @@ export type {
   MissionOutcome,
   MissionEvent,
 } from './mission';
-export type { Enemy, EnemyKind } from './enemies';
+export type { Enemy, EnemyKind, EnemyLayoutOptions, EnemyHitResult } from './enemies';
+export type {
+  DroneRole,
+  TurretMode,
+  FormationKind,
+  DirectorBeat,
+  DirectorSnapshot,
+  TelegraphPhase,
+  MoveIntent,
+} from './ai';
+export {
+  DifficultyDirector,
+  planMissionEncounter,
+  createRng,
+  hashSeed,
+  DRONE_ROLES,
+  TURRET_MODES,
+  buildFormation,
+  updateTelegraph,
+  createTelegraphState,
+  steerDrone,
+  reinforceWaveSize,
+} from './ai';

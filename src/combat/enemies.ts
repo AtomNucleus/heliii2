@@ -2,6 +2,30 @@ import * as THREE from 'three';
 import { COLORS } from '../scene/setup';
 import type { WeaponSystem } from './weapons';
 import type { CombatEffects } from './effects';
+import {
+  type DroneRole,
+  type TurretMode,
+  type TelegraphState,
+  type MoveIntent,
+  type DirectorSnapshot,
+  getDroneRole,
+  getTurretMode,
+  createTelegraphState,
+  defaultTelegraphConfig,
+  updateTelegraph,
+  steerDrone,
+  aimWithLead,
+  sweepYawOffset,
+  planMissionEncounter,
+  hashSeed,
+  createRng,
+  buildFormation,
+  slotWorldPosition,
+  pickReinforceSpawnAnchor,
+  defaultEncounterBeats,
+  type EncounterBeat,
+  v3,
+} from './ai';
 
 export type EnemyKind = 'turret' | 'drone' | 'depot';
 
@@ -25,6 +49,28 @@ export interface Enemy {
   scoreValue: number;
   beacon: THREE.Mesh | null;
   hitFlash: number;
+  /** AI extensions (optional for API compat) */
+  droneRole?: DroneRole;
+  turretMode?: TurretMode;
+  telegraph: TelegraphState;
+  moveIntent: MoveIntent;
+  underFireTimer: number;
+  formationId: number;
+  formationSlot: number;
+  boltDamage: number;
+  engageRange: number;
+  minRange: number;
+  leadTime: number;
+  telegraphDuration: number;
+  burstCount: number;
+  burstGap: number;
+  sweepHalfAngle: number;
+  sweepPeriod: number;
+  pursuitWeight: number;
+  evadeWeight: number;
+  preferredRange: number;
+  moveSpeed: number;
+  aimYaw: number;
 }
 
 export interface EnemyHitResult {
@@ -48,9 +94,12 @@ function disposeObject(obj: THREE.Object3D) {
   });
 }
 
-function makeTurretMesh(): THREE.Group {
+function makeTurretMesh(mode: TurretMode = 'tracker'): THREE.Group {
   const g = new THREE.Group();
   g.name = 'turret';
+
+  const accent =
+    mode === 'flak' ? 0xff6622 : mode === 'burst' ? 0xff3344 : mode === 'sweep' ? 0xffaa33 : COLORS.orangeHot;
 
   const base = new THREE.Mesh(
     new THREE.CylinderGeometry(1.4, 1.8, 0.6, 8),
@@ -68,7 +117,7 @@ function makeTurretMesh(): THREE.Group {
     new THREE.BoxGeometry(1.6, 1.2, 1.6),
     new THREE.MeshStandardMaterial({
       color: 0x5a3030,
-      emissive: COLORS.orangeHot,
+      emissive: accent,
       emissiveIntensity: 0.35,
       roughness: 0.55,
       metalness: 0.25,
@@ -83,7 +132,7 @@ function makeTurretMesh(): THREE.Group {
     new THREE.CylinderGeometry(0.18, 0.22, 2.2, 6),
     new THREE.MeshStandardMaterial({
       color: 0x222830,
-      emissive: COLORS.orangeSun,
+      emissive: accent,
       emissiveIntensity: 0.5,
       flatShading: true,
     }),
@@ -96,19 +145,20 @@ function makeTurretMesh(): THREE.Group {
   const beacon = new THREE.Mesh(
     new THREE.SphereGeometry(0.28, 8, 8),
     new THREE.MeshStandardMaterial({
-      color: COLORS.orangeHot,
-      emissive: COLORS.orangeHot,
+      color: accent,
+      emissive: accent,
       emissiveIntensity: 1.4,
       flatShading: true,
     }),
   );
   beacon.position.y = 1.95;
+  beacon.name = 'turret-beacon';
   g.add(beacon);
 
   return g;
 }
 
-function makeDroneMesh(): THREE.Group {
+function makeDroneMesh(tint = 0xaa44ff): THREE.Group {
   const g = new THREE.Group();
   g.name = 'drone';
 
@@ -116,20 +166,21 @@ function makeDroneMesh(): THREE.Group {
     new THREE.OctahedronGeometry(1.1, 0),
     new THREE.MeshStandardMaterial({
       color: 0x3a2850,
-      emissive: 0xaa44ff,
+      emissive: tint,
       emissiveIntensity: 0.55,
       roughness: 0.4,
       metalness: 0.4,
       flatShading: true,
     }),
   );
+  hull.name = 'drone-hull';
   g.add(hull);
 
   const ring = new THREE.Mesh(
     new THREE.TorusGeometry(1.4, 0.12, 6, 16),
     new THREE.MeshStandardMaterial({
-      color: COLORS.orangeGlow,
-      emissive: COLORS.orangeSun,
+      color: tint,
+      emissive: tint,
       emissiveIntensity: 0.9,
       flatShading: true,
     }),
@@ -143,7 +194,7 @@ function makeDroneMesh(): THREE.Group {
       new THREE.BoxGeometry(0.18, 0.12, 1.6),
       new THREE.MeshStandardMaterial({
         color: 0x2a2038,
-        emissive: 0x6622aa,
+        emissive: tint,
         emissiveIntensity: 0.35,
         flatShading: true,
       }),
@@ -152,6 +203,22 @@ function makeDroneMesh(): THREE.Group {
     arm.position.y = 0.05;
     g.add(arm);
   }
+
+  // Telegraph glow disc (hidden until windup)
+  const telegraph = new THREE.Mesh(
+    new THREE.RingGeometry(1.6, 2.1, 16),
+    new THREE.MeshBasicMaterial({
+      color: tint,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    }),
+  );
+  telegraph.rotation.x = -Math.PI / 2;
+  telegraph.name = 'drone-telegraph';
+  g.add(telegraph);
 
   return g;
 }
@@ -199,7 +266,6 @@ function makeDepotMesh(): THREE.Group {
   antenna.position.set(0.9, 2.8, 0.9);
   g.add(antenna);
 
-  // Vertical objective beacon (easy to spot from altitude)
   const pillar = new THREE.Mesh(
     new THREE.CylinderGeometry(0.18, 0.35, 14, 8),
     new THREE.MeshBasicMaterial({
@@ -241,12 +307,20 @@ export interface EnemyLayoutOptions {
   getGroundHeight: (x: number, z: number) => number;
   mapHalfExtent: number;
   spawn: THREE.Vector3;
+  /** Optional seed for deterministic layouts */
+  seed?: number;
   /** Optional authored combat spaces from the environment layer */
   combatSpaces?: CombatSpaceAnchor[];
 }
 
+export interface EnemyUpdateContext {
+  director?: DirectorSnapshot;
+  /** Optional toast callback for encounter labels */
+  onToast?: (message: string) => void;
+}
+
 /**
- * Enemy targets + threats: AA turrets, supply depots (primary), orbiting drones.
+ * Enemy targets + threats: AA turrets, supply depots (primary), role-driven drones.
  */
 export class EnemySystem {
   readonly group = new THREE.Group();
@@ -255,7 +329,11 @@ export class EnemySystem {
   private readonly effects: CombatEffects;
   private tmpDir = new THREE.Vector3();
   private tmpOrigin = new THREE.Vector3();
-  private tmpLead = new THREE.Vector3();
+  private layoutOpts: EnemyLayoutOptions | null = null;
+  private encounterBeats: EncounterBeat[] = [];
+  private beatsFired = new Set<number>();
+  private primariesDestroyed = 0;
+  private reinforceRng = createRng(1);
 
   constructor(scene: THREE.Scene, weapons: WeaponSystem, effects: CombatEffects) {
     this.group.name = 'enemies';
@@ -278,6 +356,10 @@ export class EnemySystem {
 
   get killCount(): number {
     return this.enemies.filter((e) => !e.alive).length;
+  }
+
+  get aliveThreats(): number {
+    return this.enemies.filter((e) => e.alive && !e.primary).length;
   }
 
   /** World positions of alive enemies (for rocket homing). */
@@ -321,92 +403,182 @@ export class EnemySystem {
 
   spawnMission(opts: EnemyLayoutOptions) {
     this.clear();
-    const { getGroundHeight, mapHalfExtent, spawn, combatSpaces } = opts;
-    const half = mapHalfExtent * 0.72;
+    this.layoutOpts = opts;
+    this.encounterBeats = defaultEncounterBeats();
+    this.beatsFired.clear();
+    this.primariesDestroyed = 0;
 
-    const authoredDepots = (combatSpaces ?? []).filter((s) => s.kind === 'depot');
-    const authoredAa = (combatSpaces ?? []).filter((s) => s.kind === 'aa');
+    const seed =
+      opts.seed ??
+      hashSeed(
+        `heli-${Math.round(opts.spawn.x)}-${Math.round(opts.spawn.z)}-${Math.round(opts.mapHalfExtent)}`,
+      );
+    this.reinforceRng = createRng(seed ^ 0xabc123);
 
-    const depotSpots: Array<[number, number]> =
-      authoredDepots.length > 0
-        ? authoredDepots.map((s) => [s.center.x, s.center.z] as [number, number])
-        : [
-            [half * 0.55, half * 0.35],
-            [-half * 0.5, half * 0.45],
-            [half * 0.15, -half * 0.55],
-            [-half * 0.35, -half * 0.4],
-            [half * 0.65, -half * 0.15],
-          ];
+    const plan = planMissionEncounter({
+      seed,
+      mapHalfExtent: opts.mapHalfExtent,
+      playerSpawn: v3(opts.spawn.x, opts.spawn.y, opts.spawn.z),
+      getGroundHeight: opts.getGroundHeight,
+      depotCount: 4,
+      turretCount: 8,
+      droneCount: 8,
+    });
 
-    for (const [x, z] of depotSpots) {
-      if (Math.hypot(x - spawn.x, z - spawn.z) < 28) continue;
-      const y = getGroundHeight(x, z);
-      this.addEnemy('depot', new THREE.Vector3(x, y, z), {
+    const authoredDepots = (opts.combatSpaces ?? []).filter((space) => space.kind === 'depot');
+    const authoredAa = (opts.combatSpaces ?? []).filter((space) => space.kind === 'aa');
+    for (let i = 0; i < Math.min(plan.depots.length, authoredDepots.length); i++) {
+      const space = authoredDepots[i]!;
+      plan.depots[i]!.position = v3(space.center.x, space.groundY, space.center.z);
+    }
+    for (let i = 0; i < Math.min(plan.turrets.length, authoredAa.length); i++) {
+      const space = authoredAa[i]!;
+      const angle = (i / Math.max(1, authoredAa.length)) * Math.PI * 2;
+      plan.turrets[i]!.position = v3(
+        space.center.x + Math.cos(angle) * space.radius * 0.55,
+        space.groundY,
+        space.center.z + Math.sin(angle) * space.radius * 0.55,
+      );
+    }
+
+    for (const d of plan.depots) {
+      this.addEnemy('depot', new THREE.Vector3(d.position.x, d.position.y, d.position.z), {
         primary: true,
         health: 95,
         scoreValue: 550,
       });
     }
 
-    while (this.primaryTotal < 4) {
-      const a = Math.random() * Math.PI * 2;
-      const r = half * (0.35 + Math.random() * 0.4);
-      const x = Math.cos(a) * r;
-      const z = Math.sin(a) * r;
-      if (Math.hypot(x - spawn.x, z - spawn.z) < 30) continue;
-      const y = getGroundHeight(x, z);
-      this.addEnemy('depot', new THREE.Vector3(x, y, z), {
-        primary: true,
-        health: 95,
-        scoreValue: 550,
+    for (const t of plan.turrets) {
+      const profile = getTurretMode(t.mode);
+      this.addEnemy('turret', new THREE.Vector3(t.position.x, t.position.y, t.position.z), {
+        primary: false,
+        health: profile.health,
+        scoreValue: profile.scoreValue,
+        fireCooldown: profile.fireCooldown,
+        turretMode: t.mode,
+        boltDamage: profile.boltDamage,
+        engageRange: profile.engageRange,
+        minRange: profile.minRange,
+        leadTime: profile.leadTime,
+        telegraphDuration: profile.telegraphDuration,
+        burstCount: profile.burstCount,
+        burstGap: profile.burstGap,
+        sweepHalfAngle: profile.sweepHalfAngle,
+        sweepPeriod: profile.sweepPeriod,
       });
     }
 
-    const turretCount = 8;
-    for (let i = 0; i < turretCount; i++) {
-      let x: number;
-      let z: number;
-      if (i < authoredAa.length) {
-        const space = authoredAa[i];
-        const a = (i / Math.max(1, authoredAa.length)) * Math.PI * 2;
-        x = space.center.x + Math.cos(a) * space.radius * 0.55;
-        z = space.center.z + Math.sin(a) * space.radius * 0.55;
-      } else {
-        const t = (i / turretCount) * Math.PI * 2 + 0.4;
-        const r = half * (0.4 + (i % 3) * 0.12);
-        x = Math.cos(t) * r;
-        z = Math.sin(t) * r;
-      }
-      if (Math.hypot(x - spawn.x, z - spawn.z) < 22) continue;
-      const y = getGroundHeight(x, z);
-      this.addEnemy('turret', new THREE.Vector3(x, y, z), {
-        primary: false,
-        health: 55,
-        scoreValue: 320,
-        fireCooldown: 1.25 + (i % 3) * 0.28,
-      });
+    for (const d of plan.drones) {
+      const profile = getDroneRole(d.role);
+      this.addEnemy(
+        'drone',
+        new THREE.Vector3(d.position.x, d.position.y, d.position.z),
+        {
+          primary: false,
+          health: profile.health,
+          scoreValue: profile.scoreValue,
+          fireCooldown: profile.fireCooldown,
+          orbitCenter: new THREE.Vector3(d.orbitCenter.x, d.orbitCenter.y, d.orbitCenter.z),
+          orbitRadius: d.orbitRadius,
+          orbitHeight: d.orbitHeight,
+          orbitAngle: d.orbitAngle,
+          droneRole: d.role,
+          boltDamage: profile.boltDamage,
+          engageRange: profile.engageRange,
+          minRange: profile.minRange,
+          leadTime: profile.leadTime,
+          telegraphDuration: profile.telegraphDuration,
+          pursuitWeight: profile.pursuitWeight,
+          evadeWeight: profile.evadeWeight,
+          preferredRange: profile.preferredRange,
+          moveSpeed: profile.moveSpeed,
+          formationId: d.formationId,
+          formationSlot: d.formationSlot,
+        },
+      );
     }
+  }
 
-    const droneCount = 6;
-    for (let i = 0; i < droneCount; i++) {
-      const t = (i / droneCount) * Math.PI * 2;
-      const cx = Math.cos(t + 1.1) * half * 0.35;
-      const cz = Math.sin(t + 1.1) * half * 0.35;
-      const ground = getGroundHeight(cx, cz);
-      const orbitR = 14 + (i % 3) * 5;
-      const height = ground + 18 + (i % 4) * 4;
-      const pos = new THREE.Vector3(cx + orbitR, height, cz);
-      this.addEnemy('drone', pos, {
+  /**
+   * Spawn a reinforcement formation (director-gated). Returns count added.
+   */
+  spawnReinforcement(
+    roles: DroneRole[],
+    formationKind: EncounterBeat['formation'],
+    heliPos: THREE.Vector3,
+    _label?: string,
+  ): number {
+    if (!this.layoutOpts) return 0;
+    const anchorFlat = pickReinforceSpawnAnchor(
+      this.reinforceRng,
+      v3(heliPos.x, heliPos.y, heliPos.z),
+      this.layoutOpts.mapHalfExtent * 0.72,
+    );
+    const ground = this.layoutOpts.getGroundHeight(anchorFlat.x, anchorFlat.z);
+    const height = ground + 22;
+    const anchor = v3(anchorFlat.x, height, anchorFlat.z);
+    const yaw = this.reinforceRng() * Math.PI * 2;
+    const layout = buildFormation(formationKind, roles.length, 12);
+    const formationId = 1000 + this.enemies.length;
+
+    for (let i = 0; i < roles.length; i++) {
+      const role = roles[i]!;
+      const profile = getDroneRole(role);
+      const slot = layout.slots[i] ?? layout.slots[0]!;
+      const pos = slotWorldPosition(anchor, yaw, slot.offset);
+      this.addEnemy('drone', new THREE.Vector3(pos.x, pos.y, pos.z), {
         primary: false,
-        health: 42,
-        scoreValue: 420,
-        fireCooldown: 1.65 + (i % 2) * 0.25,
-        orbitCenter: new THREE.Vector3(cx, height, cz),
-        orbitRadius: orbitR,
-        orbitHeight: height,
-        orbitAngle: t,
+        health: profile.health,
+        scoreValue: profile.scoreValue,
+        fireCooldown: profile.fireCooldown,
+        orbitCenter: new THREE.Vector3(anchor.x, height, anchor.z),
+        orbitRadius: 10 + i * 3,
+        orbitHeight: height + slot.offset.y,
+        orbitAngle: yaw + (i / roles.length) * Math.PI * 2,
+        droneRole: role,
+        boltDamage: profile.boltDamage,
+        engageRange: profile.engageRange,
+        minRange: profile.minRange,
+        leadTime: profile.leadTime,
+        telegraphDuration: profile.telegraphDuration,
+        pursuitWeight: profile.pursuitWeight,
+        evadeWeight: profile.evadeWeight,
+        preferredRange: profile.preferredRange,
+        moveSpeed: profile.moveSpeed,
+        formationId,
+        formationSlot: i,
       });
     }
+    return roles.length;
+  }
+
+  /**
+   * Tick encounter pacing beats (scripted waves). Returns toast label if any.
+   */
+  tickEncounterPacing(elapsed: number, director?: DirectorSnapshot): string | null {
+    // Scripted beats skip only during opening grace; breathers still allow authored waves.
+    if (director?.beat === 'grace') return null;
+
+    for (let i = 0; i < this.encounterBeats.length; i++) {
+      if (this.beatsFired.has(i)) continue;
+      const beat = this.encounterBeats[i]!;
+      const timeReady = elapsed >= beat.atTime;
+      const objReady = this.primariesDestroyed >= beat.afterPrimariesDestroyed;
+      // Fire when either time or objective gate is met (whichever comes first after grace)
+      if (!timeReady && !objReady) continue;
+
+      this.beatsFired.add(i);
+      return beat.label;
+    }
+    return null;
+  }
+
+  /** Fire the beat at index (used after tickEncounterPacing returns a label). */
+  releaseEncounterBeat(label: string, heliPos: THREE.Vector3): number {
+    const beat = this.encounterBeats.find((b) => b.label === label);
+    if (!beat) return 0;
+    return this.spawnReinforcement(beat.droneRoles, beat.formation, heliPos, label);
   }
 
   private addEnemy(
@@ -421,15 +593,33 @@ export class EnemySystem {
       orbitRadius?: number;
       orbitHeight?: number;
       orbitAngle?: number;
+      droneRole?: DroneRole;
+      turretMode?: TurretMode;
+      boltDamage?: number;
+      engageRange?: number;
+      minRange?: number;
+      leadTime?: number;
+      telegraphDuration?: number;
+      burstCount?: number;
+      burstGap?: number;
+      sweepHalfAngle?: number;
+      sweepPeriod?: number;
+      pursuitWeight?: number;
+      evadeWeight?: number;
+      preferredRange?: number;
+      moveSpeed?: number;
+      formationId?: number;
+      formationSlot?: number;
     },
   ) {
     let mesh: THREE.Group;
     let radius: number;
     if (kind === 'turret') {
-      mesh = makeTurretMesh();
+      mesh = makeTurretMesh(opts.turretMode ?? 'tracker');
       radius = 2.4;
     } else if (kind === 'drone') {
-      mesh = makeDroneMesh();
+      const tint = opts.droneRole ? getDroneRole(opts.droneRole).tint : 0xaa44ff;
+      mesh = makeDroneMesh(tint);
       radius = 1.8;
     } else {
       mesh = makeDepotMesh();
@@ -442,8 +632,11 @@ export class EnemySystem {
     const beacon =
       kind === 'depot'
         ? ((mesh.getObjectByName('depot-beacon') as THREE.Mesh) ?? null)
-        : null;
+        : kind === 'turret'
+          ? ((mesh.getObjectByName('turret-beacon') as THREE.Mesh) ?? null)
+          : null;
 
+    const fireCooldown = opts.fireCooldown ?? 99;
     const enemy: Enemy = {
       id: nextEnemyId++,
       kind,
@@ -454,8 +647,8 @@ export class EnemySystem {
       radius,
       alive: true,
       primary: opts.primary,
-      fireCooldown: opts.fireCooldown ?? 99,
-      fireTimer: Math.random() * (opts.fireCooldown ?? 2),
+      fireCooldown,
+      fireTimer: fireCooldown * 0.35 + (opts.formationSlot ?? 0) * 0.15,
       orbitCenter: opts.orbitCenter ?? null,
       orbitAngle: opts.orbitAngle ?? 0,
       orbitRadius: opts.orbitRadius ?? 0,
@@ -463,6 +656,27 @@ export class EnemySystem {
       scoreValue: opts.scoreValue,
       beacon,
       hitFlash: 0,
+      droneRole: opts.droneRole,
+      turretMode: opts.turretMode,
+      telegraph: createTelegraphState(),
+      moveIntent: 'orbit',
+      underFireTimer: 0,
+      formationId: opts.formationId ?? -1,
+      formationSlot: opts.formationSlot ?? 0,
+      boltDamage: opts.boltDamage ?? (kind === 'drone' ? 11 : 14),
+      engageRange: opts.engageRange ?? (kind === 'drone' ? 58 : 72),
+      minRange: opts.minRange ?? 7,
+      leadTime: opts.leadTime ?? 0.35,
+      telegraphDuration: opts.telegraphDuration ?? 0.4,
+      burstCount: opts.burstCount ?? 1,
+      burstGap: opts.burstGap ?? 0.1,
+      sweepHalfAngle: opts.sweepHalfAngle ?? 0,
+      sweepPeriod: opts.sweepPeriod ?? 1,
+      pursuitWeight: opts.pursuitWeight ?? 0.5,
+      evadeWeight: opts.evadeWeight ?? 0.4,
+      preferredRange: opts.preferredRange ?? 30,
+      moveSpeed: opts.moveSpeed ?? 1,
+      aimYaw: 0,
     };
     this.enemies.push(enemy);
   }
@@ -473,9 +687,17 @@ export class EnemySystem {
     heliPos: THREE.Vector3,
     heliVel: THREE.Vector3,
     playerAlive: boolean,
+    ctx: EnemyUpdateContext = {},
   ) {
+    const aggression = ctx.director?.aggression ?? 0.5;
+    const fireRateMul = ctx.director?.fireRateMul ?? 1;
+
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
+
+      if (enemy.underFireTimer > 0) {
+        enemy.underFireTimer = Math.max(0, enemy.underFireTimer - dt);
+      }
 
       if (enemy.hitFlash > 0) {
         enemy.hitFlash = Math.max(0, enemy.hitFlash - dt * 4);
@@ -483,31 +705,83 @@ export class EnemySystem {
           if ((obj as THREE.Mesh).isMesh) {
             const mat = (obj as THREE.Mesh).material as THREE.MeshStandardMaterial;
             if (mat.emissiveIntensity !== undefined) {
-              mat.emissiveIntensity = (mat.userData.baseEmissive ?? mat.emissiveIntensity) + enemy.hitFlash * 1.2;
+              mat.emissiveIntensity =
+                (mat.userData.baseEmissive ?? mat.emissiveIntensity) + enemy.hitFlash * 1.2;
             }
           }
         });
       }
 
-      if (enemy.kind === 'drone' && enemy.orbitCenter) {
-        enemy.orbitAngle += dt * 0.58;
-        enemy.position.set(
-          enemy.orbitCenter.x + Math.cos(enemy.orbitAngle) * enemy.orbitRadius,
-          enemy.orbitHeight + Math.sin(time * 1.4 + enemy.id) * 1.6,
-          enemy.orbitCenter.z + Math.sin(enemy.orbitAngle) * enemy.orbitRadius,
-        );
+      // --- Drone movement (roles / pursuit / evasion / formations) ---
+      if (enemy.kind === 'drone') {
+        const steered = steerDrone({
+          position: v3(enemy.position.x, enemy.position.y, enemy.position.z),
+          target: v3(heliPos.x, heliPos.y, heliPos.z),
+          targetVelocity: v3(heliVel.x, heliVel.y, heliVel.z),
+          anchor: enemy.orbitCenter
+            ? v3(enemy.orbitCenter.x, enemy.orbitCenter.y, enemy.orbitCenter.z)
+            : null,
+          preferredRange: enemy.preferredRange,
+          moveSpeed: enemy.moveSpeed,
+          pursuitWeight: enemy.pursuitWeight,
+          evadeWeight: enemy.evadeWeight,
+          aggression,
+          underFire: enemy.underFireTimer > 0,
+          dt,
+          time,
+          id: enemy.id,
+          orbitAngle: enemy.orbitAngle,
+          orbitRadius: enemy.orbitRadius,
+          orbitHeight: enemy.orbitHeight,
+        });
+        enemy.position.set(steered.position.x, steered.position.y, steered.position.z);
+        enemy.orbitAngle = steered.orbitAngle;
+        enemy.moveIntent = steered.intent;
         enemy.mesh.position.copy(enemy.position);
-        enemy.mesh.rotation.y = enemy.orbitAngle + Math.PI / 2;
+        enemy.mesh.rotation.y = steered.yaw;
         const ring = enemy.mesh.getObjectByName('drone-ring');
         if (ring) ring.rotation.z = time * 3.2;
+
+        // Telegraph ring visual
+        const tel = enemy.mesh.getObjectByName('drone-telegraph') as THREE.Mesh | undefined;
+        if (tel) {
+          const mat = tel.material as THREE.MeshBasicMaterial;
+          mat.opacity = enemy.telegraph.intensity * 0.85;
+          tel.scale.setScalar(1 + enemy.telegraph.intensity * 0.35);
+        }
       }
 
+      // --- Turret aim ---
       if (enemy.kind === 'turret') {
         const body = enemy.mesh.getObjectByName('turret-body');
         this.tmpDir.subVectors(heliPos, enemy.position);
         this.tmpDir.y = 0;
         if (body && this.tmpDir.lengthSq() > 0.01) {
-          body.rotation.y = Math.atan2(this.tmpDir.x, this.tmpDir.z);
+          let yaw = Math.atan2(this.tmpDir.x, this.tmpDir.z);
+          if (enemy.turretMode === 'sweep') {
+            yaw += sweepYawOffset(
+              time,
+              enemy.sweepPeriod,
+              enemy.sweepHalfAngle,
+              enemy.id * 0.37,
+            );
+          }
+          // Smooth toward aim
+          let delta = yaw - enemy.aimYaw;
+          while (delta > Math.PI) delta -= Math.PI * 2;
+          while (delta < -Math.PI) delta += Math.PI * 2;
+          const turn = (enemy.turretMode ? getTurretMode(enemy.turretMode).turnRate : 2) * dt;
+          enemy.aimYaw += Math.max(-turn, Math.min(turn, delta));
+          body.rotation.y = enemy.aimYaw;
+        }
+
+        if (enemy.beacon) {
+          const mat = enemy.beacon.material as THREE.MeshStandardMaterial;
+          if (mat.userData.baseEmissive === undefined) {
+            mat.userData.baseEmissive = mat.emissiveIntensity;
+          }
+          mat.emissiveIntensity =
+            (mat.userData.baseEmissive as number) + enemy.telegraph.intensity * 1.8;
         }
       }
 
@@ -524,26 +798,47 @@ export class EnemySystem {
       if (enemy.kind === 'depot') continue;
 
       const dist = enemy.position.distanceTo(heliPos);
-      const range = enemy.kind === 'drone' ? 58 : 72;
-      if (dist > range || dist < 7) continue;
+      const inRange = dist <= enemy.engageRange && dist >= enemy.minRange;
 
-      enemy.fireTimer -= dt;
-      if (enemy.fireTimer > 0) continue;
-      enemy.fireTimer = enemy.fireCooldown;
+      // Fire cadence gate (director-scaled)
+      enemy.fireTimer -= dt * fireRateMul;
+      const wantsAttack = inRange && enemy.fireTimer <= 0 && enemy.telegraph.phase === 'idle';
+
+      const telCfg = defaultTelegraphConfig(
+        enemy.telegraphDuration,
+        enemy.burstCount,
+        enemy.burstGap,
+      );
+      const telResult = updateTelegraph(enemy.telegraph, telCfg, dt, wantsAttack);
+      enemy.telegraph = telResult.state;
+
+      if (telResult.startedWindup) {
+        // Lock next volley cadence when windup begins
+        enemy.fireTimer = enemy.fireCooldown;
+      }
+
+      if (!telResult.fire) continue;
 
       this.tmpOrigin.copy(enemy.position);
       this.tmpOrigin.y += enemy.kind === 'drone' ? 0.5 : 1.4;
 
-      // Lead the player slightly for readable but threatening fire
-      this.tmpLead.copy(heliPos).addScaledVector(heliVel, 0.35);
-      this.tmpDir.subVectors(this.tmpLead, this.tmpOrigin).normalize();
-      this.tmpDir.y += 0.04;
-      this.tmpDir.normalize();
-      this.weapons.spawnEnemyBolt(
-        this.tmpOrigin,
-        this.tmpDir,
-        enemy.kind === 'drone' ? 11 : 14,
+      const aim = aimWithLead(
+        v3(this.tmpOrigin.x, this.tmpOrigin.y, this.tmpOrigin.z),
+        v3(heliPos.x, heliPos.y, heliPos.z),
+        v3(heliVel.x, heliVel.y, heliVel.z),
+        enemy.leadTime,
       );
+
+      if (enemy.kind === 'turret' && enemy.turretMode === 'sweep') {
+        // Align bolt to turret aim yaw (sweep already baked into aimYaw)
+        const s = Math.sin(enemy.aimYaw);
+        const c = Math.cos(enemy.aimYaw);
+        this.tmpDir.set(s, aim.y * 0.85, c).normalize();
+      } else {
+        this.tmpDir.set(aim.x, aim.y, aim.z);
+      }
+
+      this.weapons.spawnEnemyBolt(this.tmpOrigin, this.tmpDir, enemy.boltDamage);
     }
   }
 
@@ -572,6 +867,7 @@ export class EnemySystem {
         const before = enemy.health;
         enemy.health -= p.damage;
         enemy.hitFlash = 1;
+        enemy.underFireTimer = 1.4;
         enemy.mesh.traverse((obj) => {
           if ((obj as THREE.Mesh).isMesh) {
             const mat = (obj as THREE.Mesh).material as THREE.MeshStandardMaterial;
@@ -584,10 +880,13 @@ export class EnemySystem {
         if (enemy.health <= 0) {
           enemy.alive = false;
           enemy.mesh.visible = false;
+          if (enemy.primary) this.primariesDestroyed += 1;
           this.effects.spawnExplosion(
             bodyPos.clone(),
             enemy.kind === 'depot' ? 2.0 : 1.25,
-            enemy.kind === 'drone' ? 0xaa44ff : COLORS.orangeHot,
+            enemy.kind === 'drone'
+              ? (enemy.droneRole ? getDroneRole(enemy.droneRole).tint : 0xaa44ff)
+              : COLORS.orangeHot,
           );
           results.push({
             enemy,
@@ -627,6 +926,8 @@ export class EnemySystem {
       disposeObject(enemy.mesh);
     }
     this.enemies.length = 0;
+    this.beatsFired.clear();
+    this.primariesDestroyed = 0;
   }
 
   reset(opts: EnemyLayoutOptions) {
