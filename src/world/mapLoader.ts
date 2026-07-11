@@ -19,6 +19,53 @@ export const MAP_URL = './maps/fruzer-polygon.glb';
 export const DRACO_DECODER_PATH = './draco/';
 const MAP_DOWNLOAD_TIMEOUT_MS = 45_000;
 
+export type MapQualityTier = 'low' | 'medium' | 'high';
+
+export interface MapBakeOptions {
+  heightGridResolution: number;
+  robustBoundsStride: number;
+  spawnGridSize: number;
+  probeSpawnSurface: boolean;
+  maxColliders: number;
+}
+
+export function getMapBakeOptions(tier: MapQualityTier): MapBakeOptions {
+  if (tier === 'low') {
+    return {
+      heightGridResolution: 48,
+      robustBoundsStride: 13,
+      spawnGridSize: 11,
+      probeSpawnSurface: false,
+      maxColliders: 450,
+    };
+  }
+  if (tier === 'medium') {
+    return {
+      heightGridResolution: 72,
+      robustBoundsStride: 9,
+      spawnGridSize: 15,
+      probeSpawnSurface: true,
+      maxColliders: 650,
+    };
+  }
+  return {
+    heightGridResolution: HEIGHT_GRID_RES,
+    robustBoundsStride: 7,
+    spawnGridSize: SPAWN_GRID,
+    probeSpawnSurface: true,
+    maxColliders: 850,
+  };
+}
+
+export interface LoadMapWorldOptions {
+  tier?: MapQualityTier;
+  onStage?: (label: string, stage: string) => void;
+}
+
+function yieldToMainThread(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 export interface WorldObjects {
   group: THREE.Group;
   water: THREE.Mesh | null;
@@ -118,7 +165,7 @@ export const SPAWN_HOVER = 28;
  * outlier verts (distant water / props) that inflate AABB; we find the peak
  * XZ density cell, grow a connected component, then take percentile Y.
  */
-function computeRobustBounds(root: THREE.Object3D): {
+function computeRobustBounds(root: THREE.Object3D, stride = 7): {
   box: THREE.Box3;
   sampleCount: number;
 } {
@@ -126,8 +173,6 @@ function computeRobustBounds(root: THREE.Object3D): {
   const ys: number[] = [];
   const zs: number[] = [];
   const v = new THREE.Vector3();
-  const stride = 7;
-
   root.updateMatrixWorld(true);
   root.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
@@ -243,12 +288,13 @@ function buildHeightTools(
   colliders: THREE.Object3D[],
   bounds: THREE.Box3,
   fallbackY: number,
+  resolution = HEIGHT_GRID_RES,
 ): HeightTools {
   const raycaster = new THREE.Raycaster();
   const down = new THREE.Vector3(0, -1, 0);
   const up = new THREE.Vector3(0, 1, 0);
   const origin = new THREE.Vector3();
-  const res = HEIGHT_GRID_RES;
+  const res = resolution;
   const minX = bounds.min.x;
   const maxX = bounds.max.x;
   const minZ = bounds.min.z;
@@ -350,9 +396,10 @@ export function findOpenSpawn(
   mapHalfExtent: number,
   probeClearance?: (x: number, z: number, groundY: number) => number,
   probeSurfaceMat?: (x: number, z: number) => string,
+  options?: { gridSize?: number; probeSurface?: boolean },
 ): OpenSpawn {
   const half = mapHalfExtent * SPAWN_SEARCH_FRACTION;
-  const n = SPAWN_GRID;
+  const n = Math.max(5, options?.gridSize ?? SPAWN_GRID);
   const heights: number[][] = [];
   const xs: number[] = [];
   const zs: number[] = [];
@@ -435,7 +482,7 @@ export function findOpenSpawn(
       const centerScore = 1.4 * (1 - Math.min(1, Math.hypot(cx, cz)));
 
       let matScore = 0;
-      if (probeSurfaceMat) {
+      if (probeSurfaceMat && options?.probeSurface !== false) {
         const matName = probeSurfaceMat(xs[ix], zs[iz]).toLowerCase();
         if (matName.includes('road')) matScore = 8;
         else if (matName.includes('mat01')) matScore = 2;
@@ -482,7 +529,16 @@ export function findOpenSpawn(
 export async function loadMapWorld(
   scene: THREE.Scene,
   onProgress?: (ratio: number) => void,
+  options: LoadMapWorldOptions = {},
 ): Promise<WorldObjects> {
+  const tier = options.tier ?? 'medium';
+  const bake = getMapBakeOptions(tier);
+  const beginStage = async (label: string, stage: string, ratio: number) => {
+    options.onStage?.(label, stage);
+    onProgress?.(ratio);
+    await yieldToMainThread();
+  };
+
   const draco = new DRACOLoader();
   draco.setDecoderPath(DRACO_DECODER_PATH);
 
@@ -497,7 +553,9 @@ export async function loadMapWorld(
           MAP_URL,
           resolve,
           (ev) => {
-            if (ev.total > 0 && onProgress) onProgress(ev.loaded / ev.total);
+            // Network completion is only half of startup. Reserve the rest of
+            // the progress bar for CPU-heavy map preparation.
+            if (ev.total > 0 && onProgress) onProgress((ev.loaded / ev.total) * 0.52);
           },
           reject,
         );
@@ -509,6 +567,8 @@ export async function loadMapWorld(
     draco.dispose();
     throw err;
   }
+
+  await beginStage('Preparing map geometry…', 'map-geometry', 0.56);
 
   const group = new THREE.Group();
   group.name = 'world';
@@ -525,7 +585,7 @@ export async function loadMapWorld(
   // that inflate AABB. Center + scale from a robust percentile box so the
   // dense battle-royale base fills the play area.
   mapRoot.updateMatrixWorld(true);
-  const robust = computeRobustBounds(mapRoot);
+  const robust = computeRobustBounds(mapRoot, bake.robustBoundsStride);
   const rawSize = new THREE.Vector3();
   robust.box.getSize(rawSize);
   const rawCenter = robust.box.getCenter(new THREE.Vector3());
@@ -549,6 +609,8 @@ export async function loadMapWorld(
     scale: +scale.toFixed(5),
     samples: robust.sampleCount,
   });
+
+  await beginStage('Preparing map surfaces…', 'map-materials', 0.68);
 
   const colliders: THREE.Mesh[] = [];
   mapScaled.traverse((obj) => {
@@ -599,6 +661,8 @@ export async function loadMapWorld(
 
   group.add(mapScaled);
 
+  await beginStage('Sampling terrain…', 'map-terrain', 0.76);
+
   // Play bounds from the robust box (scaled), not the outlier-inflated AABB
   const bounds = new THREE.Box3(
     new THREE.Vector3(
@@ -621,14 +685,15 @@ export async function loadMapWorld(
     colliders,
     bounds,
     FALLBACK_GROUND_Y,
+    bake.heightGridResolution,
   );
 
   // Derive AABB proxies + spatial hash for heli vs buildings (no physics engine)
-  onProgress?.(0.88);
+  await beginStage('Building collision map…', 'map-collision', 0.82);
   let collision: WorldCollision | null = null;
   try {
     collision = WorldCollision.fromMeshes(colliders, bounds, {
-      maxColliders: 850,
+      maxColliders: bake.maxColliders,
       minBuildingHeight: 2.0,
       minFootprint: 2.2,
     });
@@ -638,11 +703,16 @@ export async function loadMapWorld(
   }
 
   // Prefer open outdoor ground with clear sky (avoid hangar pits / under-roofs)
+  await beginStage('Finding a safe spawn…', 'map-spawn', 0.89);
   const open = findOpenSpawn(
     getGroundHeight,
     mapHalfExtent,
     probeClearance,
     probeSurfaceMat,
+    {
+      gridSize: bake.spawnGridSize,
+      probeSurface: bake.probeSpawnSurface,
+    },
   );
   const spawnPosition = new THREE.Vector3(open.x, open.groundY + SPAWN_HOVER, open.z);
   console.info('[map] spawn', {
@@ -658,18 +728,21 @@ export async function loadMapWorld(
   group.add(landingPad);
 
   // Procedural military-island layer — overlays Fruzer with PBR districts/ocean
+  await beginStage('Dressing the island…', 'map-environment', 0.94);
   const environment = createEnvironmentLayer({
     getGroundHeight,
     mapHalfExtent,
     spawn: spawnPosition,
     parent: group,
     underlayRoot: mapScaled,
+    tier,
   });
 
   scene.add(group);
 
   draco.dispose();
 
+  options.onStage?.('Map ready', 'map-ready');
   onProgress?.(1);
 
   return {

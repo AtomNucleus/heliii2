@@ -571,10 +571,24 @@ async function boot() {
   startBtn.textContent = 'LOADING…';
 
   try {
-    world = await loadMapWorld(scene, (ratio) => {
-      const pct = Math.round(ratio * 100);
-      setLoadingText(`Loading Fruzer Polygon map… ${pct}%`);
-    });
+    world = await loadMapWorld(
+      scene,
+      (ratio) => {
+        const pct = Math.round(ratio * 100);
+        const current = appRoot?.dataset.startupStageLabel ?? 'Loading Fruzer Polygon map…';
+        setLoadingText(`${current} ${pct}%`);
+      },
+      {
+        tier: fx.quality.currentTier,
+        onStage: (label, stage) => {
+          if (appRoot) {
+            appRoot.dataset.startupStage = stage;
+            appRoot.dataset.startupStageLabel = label;
+          }
+          setLoadingText(label);
+        },
+      },
+    );
 
     sceneSetup.attachSky(world.sky);
     sceneSetup.attachSunDisc(world.sunDisc);
