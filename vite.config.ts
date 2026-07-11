@@ -36,9 +36,7 @@ export default defineConfig({
           if (
             id.includes('three.webgpu') ||
             id.includes('/three/webgpu') ||
-            id.includes('three.tsl') ||
-            id.includes('/src/scene/skyMaterials') ||
-            id.includes('/src/effects/postprocessingWebgpu')
+            id.includes('three.tsl')
           ) {
             return 'three-webgpu';
           }
