@@ -628,12 +628,13 @@ export async function loadMapWorld(
   landingPad.position.set(open.x, open.groundY + 0.12, open.z);
   group.add(landingPad);
 
-  // Procedural environment layer — keeps licensed Fruzer GLB, adds density
+  // Procedural military-island layer — overlays Fruzer with PBR districts/ocean
   const environment = createEnvironmentLayer({
     getGroundHeight,
     mapHalfExtent,
     spawn: spawnPosition,
     parent: group,
+    underlayRoot: mapScaled,
   });
 
   scene.add(group);
@@ -644,7 +645,7 @@ export async function loadMapWorld(
 
   return {
     group,
-    water: null,
+    water: environment.water,
     landingPad,
     spawnPosition,
     getGroundHeight,

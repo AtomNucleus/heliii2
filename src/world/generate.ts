@@ -444,6 +444,13 @@ export function generateWorld(scene: THREE.Scene): WorldObjects {
 /** Subtle water shimmer via material opacity / color pulse */
 export function updateWater(water: THREE.Mesh, time: number) {
   const mat = water.material as THREE.MeshStandardMaterial;
-  mat.opacity = 0.68 + Math.sin(time * 0.8) * 0.04;
-  water.position.y = 0.12 + Math.sin(time * 0.5) * 0.04;
+  if (mat?.opacity != null) {
+    const baseOp = (water.userData.baseOpacity as number | undefined) ?? mat.opacity;
+    water.userData.baseOpacity = baseOp;
+    mat.opacity = baseOp * 0.95 + Math.sin(time * 0.8) * 0.04;
+  }
+  const baseY =
+    (water.userData.baseY as number | undefined) ??
+    (water.userData.baseY = water.position.y);
+  water.position.y = baseY + Math.sin(time * 0.5) * 0.03;
 }

@@ -1,5 +1,5 @@
 /**
- * Quality-scaled draw budgets for the Fruzer environment layer.
+ * Quality-scaled draw budgets for the military-island environment layer.
  * Counts are instance caps — actual placed count may be lower.
  */
 
@@ -19,73 +19,90 @@ export interface EnvBudget {
   rubble: number;
   landmarks: number;
   combatSpaces: number;
+  compounds: number;
+  navMarkers: number;
+  oceanDetail: number;
   flags: number;
   blinkLights: number;
   smokeColumns: number;
   birds: number;
   animate: boolean;
+  /** Soften Fruzer underlay brightness (0..1, lower = more subdued) */
+  fruzerUnderlay: number;
 }
 
 const BUDGETS: Record<EnvQualityTier, EnvBudget> = {
   low: {
     tier: 'low',
-    buildings: 28,
-    rooftopProps: 20,
-    trees: 40,
-    bushes: 36,
-    streetLamps: 18,
-    barriers: 24,
-    crates: 20,
-    cones: 16,
-    groundPatches: 30,
-    rubble: 24,
-    landmarks: 4,
+    buildings: 22,
+    rooftopProps: 16,
+    trees: 36,
+    bushes: 28,
+    streetLamps: 14,
+    barriers: 18,
+    crates: 16,
+    cones: 12,
+    groundPatches: 24,
+    rubble: 18,
+    landmarks: 5,
     combatSpaces: 4,
+    compounds: 3,
+    navMarkers: 12,
+    oceanDetail: 4,
     flags: 4,
     blinkLights: 10,
     smokeColumns: 2,
     birds: 4,
     animate: true,
+    fruzerUnderlay: 0.42,
   },
   medium: {
     tier: 'medium',
-    buildings: 48,
-    rooftopProps: 40,
-    trees: 70,
-    bushes: 60,
-    streetLamps: 32,
-    barriers: 40,
-    crates: 36,
-    cones: 28,
-    groundPatches: 55,
-    rubble: 42,
-    landmarks: 6,
+    buildings: 40,
+    rooftopProps: 32,
+    trees: 64,
+    bushes: 52,
+    streetLamps: 28,
+    barriers: 34,
+    crates: 30,
+    cones: 22,
+    groundPatches: 48,
+    rubble: 36,
+    landmarks: 7,
     combatSpaces: 5,
+    compounds: 4,
+    navMarkers: 18,
+    oceanDetail: 6,
     flags: 7,
     blinkLights: 18,
     smokeColumns: 3,
     birds: 8,
     animate: true,
+    fruzerUnderlay: 0.48,
   },
   high: {
     tier: 'high',
-    buildings: 72,
-    rooftopProps: 64,
-    trees: 110,
-    bushes: 90,
-    streetLamps: 48,
-    barriers: 56,
-    crates: 52,
-    cones: 40,
-    groundPatches: 80,
-    rubble: 64,
+    buildings: 58,
+    rooftopProps: 48,
+    trees: 96,
+    bushes: 78,
+    streetLamps: 40,
+    barriers: 48,
+    crates: 42,
+    cones: 32,
+    groundPatches: 68,
+    rubble: 52,
     landmarks: 8,
-    combatSpaces: 5,
+    combatSpaces: 6,
+    compounds: 5,
+    navMarkers: 24,
+    oceanDetail: 8,
     flags: 10,
-    blinkLights: 28,
+    blinkLights: 26,
     smokeColumns: 4,
     birds: 12,
     animate: true,
+    fruzerUnderlay: 0.55,
   },
 };
 

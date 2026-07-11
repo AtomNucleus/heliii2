@@ -13,7 +13,7 @@ interface BlinkSlot {
   mesh: THREE.Mesh;
   phase: number;
   rate: number;
-  mat: THREE.MeshBasicMaterial;
+  mat: THREE.MeshStandardMaterial;
   baseColor: THREE.Color;
 }
 
@@ -21,7 +21,7 @@ interface SmokeSlot {
   mesh: THREE.Mesh;
   phase: number;
   baseY: number;
-  mat: THREE.MeshBasicMaterial;
+  mat: THREE.MeshStandardMaterial;
 }
 
 interface BirdSlot {

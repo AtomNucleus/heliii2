@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { makePBR, makeEmissivePBR, type PbrOpts } from './materials';
 
 /** Deterministic mulberry32 PRNG */
 export function createRng(seed: number): () => number {
@@ -29,7 +30,7 @@ export function disposeObject3D(obj: THREE.Object3D) {
   });
 }
 
-/** Shared unlit material matching Fruzer MeshBasic look */
+/** @deprecated Prefer makePBR — kept as thin alias for gradual migration */
 export function makeBasic(
   color: number,
   opts: {
@@ -39,32 +40,27 @@ export function makeBasic(
     side?: THREE.Side;
     name?: string;
   } = {},
-): THREE.MeshBasicMaterial {
-  const mat = new THREE.MeshBasicMaterial({
-    color,
-    transparent: opts.transparent ?? false,
-    opacity: opts.opacity ?? 1,
-    depthWrite: opts.depthWrite ?? true,
-    side: opts.side ?? THREE.FrontSide,
+): THREE.MeshStandardMaterial {
+  return makePBR(color, {
+    roughness: 0.88,
+    metalness: 0.06,
+    transparent: opts.transparent,
+    opacity: opts.opacity,
+    depthWrite: opts.depthWrite,
+    side: opts.side,
+    name: opts.name,
   });
-  if (opts.name) mat.name = opts.name;
-  return mat;
 }
 
 export function makeEmissiveBasic(
   color: number,
   intensity = 1,
-): THREE.MeshBasicMaterial {
-  // MeshBasic has no emissive — bake brightness into color + additive overlays
-  const c = new THREE.Color(color);
-  c.multiplyScalar(0.65 + intensity * 0.55);
-  return new THREE.MeshBasicMaterial({
-    color: c,
-    transparent: intensity > 1.05,
-    opacity: Math.min(1, 0.75 + intensity * 0.2),
-    depthWrite: intensity <= 1.05,
-  });
+): THREE.MeshStandardMaterial {
+  return makeEmissivePBR(color, intensity);
 }
+
+export { makePBR, makeEmissivePBR };
+export type { PbrOpts };
 
 export interface PlacementSample {
   x: number;
@@ -125,4 +121,10 @@ export function setInstanceMatrix(
   dummy.scale.copy(scale);
   dummy.updateMatrix();
   mesh.setMatrixAt(index, dummy.matrix);
+}
+
+/** Enable cheap shadow receive on a mesh (cast optional). */
+export function enableShadows(mesh: THREE.Mesh, cast = false, receive = true) {
+  mesh.castShadow = cast;
+  mesh.receiveShadow = receive;
 }
