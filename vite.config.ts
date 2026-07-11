@@ -19,6 +19,9 @@ export default defineConfig({
           if (id.includes('node_modules/three/examples')) {
             return 'three-examples';
           }
+          if (id.includes('three.webgpu') || id.includes('/three/webgpu') || id.includes('three.tsl')) {
+            return 'three-webgpu';
+          }
           if (id.includes('node_modules/three')) {
             return 'three';
           }

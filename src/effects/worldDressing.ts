@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { COLORS } from '../scene/setup';
+import { isWebGPUActive } from '../render/runtime';
 import type { QualitySettings } from './quality';
 
 interface CloudSlot {
@@ -78,18 +79,28 @@ export class WorldDressing {
 
     // Soft horizon haze torus / ring — cheap atmospheric depth cue
     const hazeGeo = new THREE.CylinderGeometry(280, 320, 28, 48, 1, true);
-    const hazeMat = new THREE.ShaderMaterial({
-      side: THREE.DoubleSide,
-      transparent: true,
-      depthWrite: false,
-      fog: false,
-      blending: THREE.AdditiveBlending,
-      uniforms: {
-        color: { value: new THREE.Color(COLORS.skyHorizon) },
-        opacity: { value: 0.18 },
-        time: { value: 0 },
-      },
-      vertexShader: /* glsl */ `
+    const hazeMat = isWebGPUActive()
+      ? new THREE.MeshBasicMaterial({
+          color: COLORS.skyHorizon,
+          transparent: true,
+          opacity: 0.18,
+          depthWrite: false,
+          fog: false,
+          side: THREE.DoubleSide,
+          blending: THREE.AdditiveBlending,
+        })
+      : new THREE.ShaderMaterial({
+          side: THREE.DoubleSide,
+          transparent: true,
+          depthWrite: false,
+          fog: false,
+          blending: THREE.AdditiveBlending,
+          uniforms: {
+            color: { value: new THREE.Color(COLORS.skyHorizon) },
+            opacity: { value: 0.18 },
+            time: { value: 0 },
+          },
+          vertexShader: /* glsl */ `
         varying vec2 vUv;
         varying float vY;
         void main() {
@@ -98,7 +109,7 @@ export class WorldDressing {
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
-      fragmentShader: /* glsl */ `
+          fragmentShader: /* glsl */ `
         uniform vec3 color;
         uniform float opacity;
         uniform float time;
@@ -111,7 +122,7 @@ export class WorldDressing {
           gl_FragColor = vec4(color, a);
         }
       `,
-    });
+        });
     this.haze = new THREE.Mesh(hazeGeo, hazeMat);
     this.haze.position.y = 8;
     this.haze.name = 'horizon-haze';
@@ -119,7 +130,18 @@ export class WorldDressing {
     this.group.add(this.haze);
   }
 
-  private makeCloudMaterial(): THREE.ShaderMaterial {
+  private makeCloudMaterial(): THREE.Material {
+    if (isWebGPUActive()) {
+      // WebGPURenderer does not support ShaderMaterial — soft billboard stand-in.
+      return new THREE.MeshBasicMaterial({
+        color: COLORS.cloud,
+        transparent: true,
+        opacity: 0.45,
+        depthWrite: false,
+        fog: false,
+        side: THREE.DoubleSide,
+      });
+    }
     return new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -172,11 +194,16 @@ export class WorldDressing {
     slot.mesh.scale.set(w, h, 1);
     slot.mesh.position.set(x, slot.baseY + Math.sin(slot.phase) * 4, z);
     slot.mesh.rotation.y = ang + Math.PI * 0.5;
-    const mat = slot.mesh.material as THREE.ShaderMaterial;
-    mat.uniforms.opacity.value = 0.28 + Math.random() * 0.28;
-    mat.uniforms.color.value.setHex(
-      Math.random() > 0.55 ? COLORS.cloud : 0xffb080,
-    );
+    const mat = slot.mesh.material;
+    const opacity = 0.28 + Math.random() * 0.28;
+    const hex = Math.random() > 0.55 ? COLORS.cloud : 0xffb080;
+    if (mat instanceof THREE.ShaderMaterial) {
+      mat.uniforms.opacity.value = opacity;
+      mat.uniforms.color.value.setHex(hex);
+    } else if (mat instanceof THREE.MeshBasicMaterial) {
+      mat.opacity = opacity;
+      mat.color.setHex(hex);
+    }
   }
 
   applyQuality(q: QualitySettings) {
@@ -215,9 +242,14 @@ export class WorldDressing {
     // Horizon haze follows player XZ
     this.haze.position.x = focus.x;
     this.haze.position.z = focus.z;
-    const hazeMat = this.haze.material as THREE.ShaderMaterial;
-    hazeMat.uniforms.time.value = this.time;
-    hazeMat.uniforms.opacity.value = 0.12 + THREE.MathUtils.clamp(1 - altitude / 100, 0, 1) * 0.12;
+    const hazeOpacity = 0.12 + THREE.MathUtils.clamp(1 - altitude / 100, 0, 1) * 0.12;
+    const hazeMat = this.haze.material;
+    if (hazeMat instanceof THREE.ShaderMaterial) {
+      hazeMat.uniforms.time.value = this.time;
+      hazeMat.uniforms.opacity.value = hazeOpacity;
+    } else if (hazeMat instanceof THREE.MeshBasicMaterial) {
+      hazeMat.opacity = hazeOpacity;
+    }
 
     // Ambient wind streaks in mid air
     const spawnChance = 0.35;

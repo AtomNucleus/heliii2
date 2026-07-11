@@ -10,8 +10,9 @@
     "lint": "eslint .",
     "format:check": "prettier --check .",
     "test": "npm run test:unit && npm run test:verify",
-    "test:unit": "tsx --test src/combat/ai/ai.test.ts",
+    "test:unit": "tsx --test src/combat/ai/ai.test.ts src/render/preference.test.ts",
     "test:ai": "tsx --test src/combat/ai/ai.test.ts",
+    "test:render": "tsx --test src/render/preference.test.ts",
     "test:collision": "node scripts/verify-collision.mjs",
     "test:mission": "node scripts/verify-mission.mjs",
     "test:verify": "npm run test:collision && npm run test:mission",
@@ -20,7 +21,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.61.1",
-    "@types/three": "^0.170.0",
+    "@types/three": "0.185.1",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.5",
@@ -30,6 +31,6 @@
     "vite": "^6.0.3"
   },
   "dependencies": {
-    "three": "^0.170.0"
+    "three": "0.185.1"
   }
 }

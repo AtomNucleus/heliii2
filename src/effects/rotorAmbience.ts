@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { COLORS } from '../scene/setup';
+import { isWebGPUActive } from '../render/runtime';
 import type { QualitySettings } from './quality';
 
 /**
@@ -22,24 +23,33 @@ export class RotorAmbience {
     this.group.name = 'rotor-ambience';
     scene.add(this.group);
 
-    const discMat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
-      uniforms: {
-        color: { value: new THREE.Color(0xa8d8ff) },
-        opacity: { value: 0.12 },
-        time: { value: 0 },
-      },
-      vertexShader: /* glsl */ `
+    const discMat = isWebGPUActive()
+      ? new THREE.MeshBasicMaterial({
+          color: 0xa8d8ff,
+          transparent: true,
+          opacity: 0.12,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide,
+        })
+      : new THREE.ShaderMaterial({
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide,
+          uniforms: {
+            color: { value: new THREE.Color(0xa8d8ff) },
+            opacity: { value: 0.12 },
+            time: { value: 0 },
+          },
+          vertexShader: /* glsl */ `
         varying vec2 vUv;
         void main() {
           vUv = uv;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
-      fragmentShader: /* glsl */ `
+          fragmentShader: /* glsl */ `
         uniform vec3 color;
         uniform float opacity;
         uniform float time;
@@ -53,7 +63,7 @@ export class RotorAmbience {
           gl_FragColor = vec4(color, a);
         }
       `,
-    });
+        });
     this.disc = new THREE.Mesh(new THREE.CircleGeometry(2.4, 32), discMat);
     this.disc.rotation.x = -Math.PI / 2;
     this.disc.name = 'rotor-shimmer';
@@ -104,10 +114,16 @@ export class RotorAmbience {
     this.group.position.copy(heliPos);
     this.group.quaternion.copy(heliQuat);
 
-    const discMat = this.disc.material as THREE.ShaderMaterial;
-    discMat.uniforms.time.value = this.time;
     const speed01 = Math.min(1, speed / 45);
-    discMat.uniforms.opacity.value = 0.08 + speed01 * 0.1;
+    const discOpacity = 0.08 + speed01 * 0.1;
+    const discMat = this.disc.material;
+    if (discMat instanceof THREE.ShaderMaterial) {
+      discMat.uniforms.time.value = this.time;
+      discMat.uniforms.opacity.value = discOpacity;
+    } else if (discMat instanceof THREE.MeshBasicMaterial) {
+      discMat.opacity = discOpacity;
+      this.disc.rotation.z = this.time * 14;
+    }
     this.disc.position.set(0, 0.55, 0.1);
 
     // Heat shimmer rising from exhaust / engine area

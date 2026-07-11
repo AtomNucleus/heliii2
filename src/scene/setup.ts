@@ -1,36 +1,16 @@
 import * as THREE from 'three';
 import type { QualitySettings } from '../effects/quality';
+import type { GameRendererHandle, RendererInitInfo } from '../render/types';
+import { isWebGPUActive } from '../render/runtime';
+import { COLORS } from './setupColors';
+import {
+  createWebGPUSunsetSkyMaterial,
+  createWebGPUSunFlareMaterial,
+  type SkyUniformHandles,
+  type FlareUniformHandles,
+} from './skyMaterials';
 
-/** Shared sunset / teal palette */
-export const COLORS = {
-  tealDeep: 0x0a2a2e,
-  tealShadow: 0x0d3d42,
-  tealMid: 0x1a5a5e,
-  orangeSun: 0xff8c3a,
-  orangeGlow: 0xffb347,
-  orangeHot: 0xff6b20,
-  neonGreen: 0x39ff9a,
-  neonDim: 0x1a8f5a,
-  water: 0x1a4a55,
-  waterDeep: 0x0d2a32,
-  grass: 0x2d6b3a,
-  grassDark: 0x1a4a28,
-  pine: 0x1e5c32,
-  pineDark: 0x0f3a1e,
-  rock: 0x4a5560,
-  rockDark: 0x2a3238,
-  sand: 0xc4a574,
-  pad: 0x3a4550,
-  padMark: 0x39ff9a,
-  skyTop: 0x142838,
-  skyMid: 0x5c3a52,
-  skyHorizon: 0xff7a3c,
-  fog: 0x3a4a58,
-  fogNear: 0x4a5568,
-  rimCool: 0x4ecdc4,
-  dust: 0xc9a882,
-  cloud: 0xffc9a0,
-};
+export { COLORS } from './setupColors';
 
 export interface AtmosphereState {
   /** 0..1 — denser haze near horizon / low altitude */
@@ -41,11 +21,31 @@ export interface AtmosphereState {
   focus: THREE.Vector3;
 }
 
+type SkyHandles = {
+  kind: 'webgl' | 'webgpu';
+  uniforms: SkyUniformHandles | THREE.ShaderMaterial['uniforms'];
+};
+
+type FlareHandles = {
+  kind: 'webgl' | 'webgpu';
+  uniforms: FlareUniformHandles | THREE.ShaderMaterial['uniforms'];
+};
+
 /**
  * Procedural gradient sky dome with sun disc glow (BackSide sphere).
- * Used by map loaders and standalone polish paths.
+ * Uses ShaderMaterial on WebGL and TSL NodeMaterial on WebGPU.
  */
 export function createSunsetSkyDome(radius = 520): THREE.Mesh {
+  if (isWebGPUActive()) {
+    const { material, uniforms } = createWebGPUSunsetSkyMaterial();
+    const sky = new THREE.Mesh(new THREE.SphereGeometry(radius, 48, 24), material);
+    sky.name = 'sunset-sky';
+    sky.frustumCulled = false;
+    sky.renderOrder = -1000;
+    sky.userData.skyHandles = { kind: 'webgpu', uniforms } satisfies SkyHandles;
+    return sky;
+  }
+
   const geo = new THREE.SphereGeometry(radius, 48, 24);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
@@ -99,7 +99,6 @@ export function createSunsetSkyDome(radius = 520): THREE.Mesh {
         col += sunColor * (sun * 0.9 * pulse + glow * 0.24 * haze);
         float horizonBand = exp(-abs(h) * 6.0) * haze * 0.28;
         col = mix(col, horizonColor, horizonBand);
-        // Soft upper-atmosphere teal wash opposite the sun
         float cool = pow(max(0.0, -dot(dir, sunDir)), 2.0) * 0.08;
         col += vec3(0.12, 0.28, 0.32) * cool;
         gl_FragColor = vec4(col, 1.0);
@@ -110,6 +109,10 @@ export function createSunsetSkyDome(radius = 520): THREE.Mesh {
   sky.name = 'sunset-sky';
   sky.frustumCulled = false;
   sky.renderOrder = -1000;
+  sky.userData.skyHandles = {
+    kind: 'webgl',
+    uniforms: mat.uniforms,
+  } satisfies SkyHandles;
   return sky;
 }
 
@@ -149,40 +152,50 @@ export function createSunDisc(): THREE.Group {
   );
   group.add(halo);
 
-  // Cheap radial flare plane facing camera-ish (billboarded in update)
   const flareGeo = new THREE.PlaneGeometry(70, 70);
-  const flareMat = new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    fog: false,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide,
-    uniforms: {
-      color: { value: new THREE.Color(COLORS.orangeHot) },
-      intensity: { value: 0.35 },
-    },
-    vertexShader: /* glsl */ `
-      varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform vec3 color;
-      uniform float intensity;
-      varying vec2 vUv;
-      void main() {
-        vec2 d = vUv - 0.5;
-        float r = length(d) * 2.0;
-        float a = exp(-r * r * 2.8) * intensity;
-        float spokes = pow(max(0.0, 1.0 - abs(d.x) * 8.0), 3.0) * exp(-abs(d.y) * 6.0) * 0.35;
-        spokes += pow(max(0.0, 1.0 - abs(d.y) * 8.0), 3.0) * exp(-abs(d.x) * 6.0) * 0.28;
-        gl_FragColor = vec4(color, clamp(a + spokes * intensity, 0.0, 0.85));
-      }
-    `,
-  });
-  const flare = new THREE.Mesh(flareGeo, flareMat);
+  let flare: THREE.Mesh;
+  if (isWebGPUActive()) {
+    const { material, uniforms } = createWebGPUSunFlareMaterial();
+    flare = new THREE.Mesh(flareGeo, material);
+    flare.userData.flareHandles = { kind: 'webgpu', uniforms } satisfies FlareHandles;
+  } else {
+    const flareMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      fog: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: {
+        color: { value: new THREE.Color(COLORS.orangeHot) },
+        intensity: { value: 0.35 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform vec3 color;
+        uniform float intensity;
+        varying vec2 vUv;
+        void main() {
+          vec2 d = vUv - 0.5;
+          float r = length(d) * 2.0;
+          float a = exp(-r * r * 2.8) * intensity;
+          float spokes = pow(max(0.0, 1.0 - abs(d.x) * 8.0), 3.0) * exp(-abs(d.y) * 6.0) * 0.35;
+          spokes += pow(max(0.0, 1.0 - abs(d.y) * 8.0), 3.0) * exp(-abs(d.x) * 6.0) * 0.28;
+          gl_FragColor = vec4(color, clamp(a + spokes * intensity, 0.0, 0.85));
+        }
+      `,
+    });
+    flare = new THREE.Mesh(flareGeo, flareMat);
+    flare.userData.flareHandles = {
+      kind: 'webgl',
+      uniforms: flareMat.uniforms,
+    } satisfies FlareHandles;
+  }
   flare.name = 'sun-flare';
   flare.renderOrder = -900;
   group.add(flare);
@@ -190,7 +203,16 @@ export function createSunDisc(): THREE.Group {
   return group;
 }
 
-export function createSceneSetup(canvas: HTMLCanvasElement) {
+export async function createSceneSetup(canvas: HTMLCanvasElement) {
+  const { createGameRenderer } = await import('../render/createRenderer');
+  const gameRenderer = await createGameRenderer({ canvas });
+  return createSceneSetupWithRenderer(canvas, gameRenderer);
+}
+
+export function createSceneSetupWithRenderer(
+  _canvas: HTMLCanvasElement,
+  gameRenderer: GameRendererHandle,
+) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(COLORS.skyTop);
   scene.fog = new THREE.FogExp2(COLORS.fog, 0.0011);
@@ -203,20 +225,8 @@ export function createSceneSetup(canvas: HTMLCanvasElement) {
   );
   camera.position.set(0, 12, 20);
 
-  const renderer = new THREE.WebGLRenderer({
-    canvas,
-    antialias: true,
-    powerPreference: 'high-performance',
-    stencil: false,
-  });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.48;
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.shadowMap.autoUpdate = true;
+  const renderer = gameRenderer.renderer;
+  const rendererInfo: RendererInitInfo = gameRenderer.info;
 
   // Warm key — sunset disc
   const sunLight = new THREE.DirectionalLight(COLORS.orangeGlow, 1.95);
@@ -298,18 +308,28 @@ export function createSceneSetup(canvas: HTMLCanvasElement) {
     renderer.toneMappingExposure = 1.42 + atmosphere.haze * 0.12;
 
     if (skyMesh) {
-      const mat = skyMesh.material as THREE.ShaderMaterial;
-      if (mat.uniforms?.haze) mat.uniforms.haze.value = atmosphere.haze;
-      if (mat.uniforms?.time) mat.uniforms.time.value += dt;
+      const handles = skyMesh.userData.skyHandles as SkyHandles | undefined;
+      if (handles?.uniforms) {
+        const hazeU = (handles.uniforms as SkyUniformHandles).haze
+          ?? (handles.uniforms as THREE.ShaderMaterial['uniforms']).haze;
+        const timeU = (handles.uniforms as SkyUniformHandles).time
+          ?? (handles.uniforms as THREE.ShaderMaterial['uniforms']).time;
+        if (hazeU) hazeU.value = atmosphere.haze;
+        if (timeU) timeU.value = (timeU.value as number) + dt;
+      }
     }
 
     if (sunDisc) {
       const flare = sunDisc.getObjectByName('sun-flare') as THREE.Mesh | undefined;
       if (flare) {
         flare.quaternion.copy(camera.quaternion);
-        const fmat = flare.material as THREE.ShaderMaterial;
-        if (fmat.uniforms?.intensity) {
-          fmat.uniforms.intensity.value = 0.28 + atmosphere.haze * 0.22 + Math.sin(atmosphere.sunPulse) * 0.03;
+        const handles = flare.userData.flareHandles as FlareHandles | undefined;
+        const intensity =
+          (handles?.uniforms as FlareUniformHandles | undefined)?.intensity
+          ?? (handles?.uniforms as THREE.ShaderMaterial['uniforms'] | undefined)?.intensity;
+        if (intensity) {
+          intensity.value =
+            0.28 + atmosphere.haze * 0.22 + Math.sin(atmosphere.sunPulse) * 0.03;
         }
       }
       const glowMesh = sunDisc.children[1] as THREE.Mesh | undefined;
@@ -348,6 +368,8 @@ export function createSceneSetup(canvas: HTMLCanvasElement) {
     scene,
     camera,
     renderer,
+    rendererInfo,
+    gameRenderer,
     sunLight,
     fillLight,
     rimLight,
@@ -363,4 +385,4 @@ export function createSceneSetup(canvas: HTMLCanvasElement) {
   };
 }
 
-export type SceneSetup = ReturnType<typeof createSceneSetup>;
+export type SceneSetup = ReturnType<typeof createSceneSetupWithRenderer>;

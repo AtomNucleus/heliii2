@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createSceneSetup } from './scene/setup';
+import { createSceneSetup, type SceneSetup } from './scene/setup';
 import { loadMapWorld, buildFigureEightRingLayout, type WorldObjects } from './world/mapLoader';
 import { updateWater } from './world/generate';
 import { loadHelicopter, updateHelicopterVisuals } from './models/helicopter';
@@ -10,6 +10,7 @@ import { MobileControls } from './hud/mobileControls';
 import { VisualEffects } from './effects/visualEffects';
 import { getGameAudio } from './audio';
 import { StrikeMission, formatEndSubtitle, type StrikeEndSummary } from './mission';
+import { applyRendererDiagnostics } from './render';
 
 type GamePhase = 'loading' | 'start' | 'playing' | 'complete' | 'failed';
 
@@ -19,11 +20,15 @@ const completeOverlay = document.getElementById('complete-overlay')!;
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement;
 const restartBtn = document.getElementById('restart-btn')!;
 const loadingStatus = document.getElementById('loading-status');
+const appRoot = document.getElementById('app');
 
-const sceneSetup = createSceneSetup(canvas);
-const { scene, camera, sunLight } = sceneSetup;
-const fx = new VisualEffects(sceneSetup);
 const audio = getGameAudio();
+
+let sceneSetup: SceneSetup;
+let scene: THREE.Scene;
+let camera: THREE.PerspectiveCamera;
+let sunLight: THREE.DirectionalLight;
+let fx: VisualEffects;
 
 let world: WorldObjects;
 let controller: HelicopterController;
@@ -36,6 +41,7 @@ let mobileControls: MobileControls;
 let phase: GamePhase = 'loading';
 let clock = new THREE.Clock();
 let ready = false;
+let rendererReady = false;
 /** Projectile mesh UUIDs that already played spawn crack. */
 const heardBolts = new Set<string>();
 /** Throttle inbound whoosh per bolt. */
@@ -136,11 +142,8 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-sunLight.target.position.set(0, 0, 0);
-scene.add(sunLight.target);
-
 function animate() {
-  requestAnimationFrame(animate);
+  if (!rendererReady) return;
   const dt = Math.min(clock.getDelta(), 0.05);
   const time = clock.elapsedTime;
 
@@ -294,9 +297,6 @@ function animate() {
 
   fx.render();
 }
-
-clock.start();
-animate();
 
 async function boot() {
   setLoadingText('Loading Fruzer Polygon map…');
@@ -554,4 +554,40 @@ async function boot() {
   }
 }
 
-boot();
+async function main() {
+  setLoadingText('Initializing renderer…');
+  startBtn.disabled = true;
+  startBtn.textContent = 'LOADING…';
+
+  try {
+    sceneSetup = await createSceneSetup(canvas);
+    applyRendererDiagnostics(appRoot, sceneSetup.rendererInfo);
+    scene = sceneSetup.scene;
+    camera = sceneSetup.camera;
+    sunLight = sceneSetup.sunLight;
+    fx = new VisualEffects(sceneSetup);
+
+    sunLight.target.position.set(0, 0, 0);
+    scene.add(sunLight.target);
+
+    rendererReady = true;
+    clock.start();
+    // setAnimationLoop waits for WebGPU init when applicable and replaces rAF.
+    sceneSetup.renderer.setAnimationLoop(animate);
+
+    console.info(
+      `[renderer] backend=${sceneSetup.rendererInfo.backend}`
+        + ` preference=${sceneSetup.rendererInfo.preference}`
+        + ` reason=${sceneSetup.rendererInfo.reason}`
+        + ` three=r${sceneSetup.rendererInfo.revision}`,
+    );
+
+    await boot();
+  } catch (err) {
+    console.error(err);
+    setLoadingText('Failed to initialize renderer. Check console / refresh.');
+    startBtn.textContent = 'LOAD FAILED';
+  }
+}
+
+void main();
