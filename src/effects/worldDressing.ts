@@ -123,7 +123,9 @@ export class WorldDressing {
     return new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
-      fog: true,
+      // Custom shaders must explicitly include Three's fog uniforms/chunks.
+      // These distant clouds already blend into the horizon by opacity.
+      fog: false,
       side: THREE.DoubleSide,
       blending: THREE.NormalBlending,
       uniforms: {
