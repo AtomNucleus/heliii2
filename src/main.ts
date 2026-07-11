@@ -281,7 +281,7 @@ async function boot() {
 
     controller.onImpact = (intensity, damage) => {
       if (damage > 0) mission.applyExternalDamage(damage, 'hard-landing');
-      audio.playImpact(intensity, damage > 8 ? 'crash' : 'hard');
+      audio.playImpact(intensity, damage > 8 ? 'damage' : 'hard');
     };
 
     mobileControls = new MobileControls({
