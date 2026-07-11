@@ -146,6 +146,7 @@ function animate() {
   controller.update(dt);
   checkpoints.update(time);
   if (world.water) updateWater(world.water, time);
+  world.environment?.update(dt, time);
 
   const speed = controller.getSpeed();
   const altitude = controller.getAltitude();
@@ -158,6 +159,8 @@ function animate() {
     altitude,
     getGroundHeight: world.getGroundHeight,
   });
+  // Keep env density in sync with adaptive quality tier
+  world.environment?.applyQuality(fx.quality.current);
   hud.tick(dt);
 
   // Soft follow shadow camera on heli — wider frustum for Fruzer map
@@ -234,9 +237,11 @@ async function boot() {
         getGroundHeight: world.getGroundHeight,
         mapHalfExtent: world.mapHalfExtent,
         spawn: world.spawnPosition.clone(),
+        combatSpaces: world.environment?.combatSpaces,
       },
       checkpoints,
     );
+    world.environment?.applyQuality(fx.quality.current);
     hud = new HUD(checkpoints.total);
     hud.enableCombatHud(true);
     hud.bindMuteHandler((muted) => audio.setMuted(muted));

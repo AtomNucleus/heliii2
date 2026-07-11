@@ -230,10 +230,19 @@ function makeDepotMesh(): THREE.Group {
   return g;
 }
 
+export interface CombatSpaceAnchor {
+  kind: 'depot' | 'aa' | 'approach';
+  center: THREE.Vector3;
+  radius: number;
+  groundY: number;
+}
+
 export interface EnemyLayoutOptions {
   getGroundHeight: (x: number, z: number) => number;
   mapHalfExtent: number;
   spawn: THREE.Vector3;
+  /** Optional authored combat spaces from the environment layer */
+  combatSpaces?: CombatSpaceAnchor[];
 }
 
 /**
@@ -312,16 +321,22 @@ export class EnemySystem {
 
   spawnMission(opts: EnemyLayoutOptions) {
     this.clear();
-    const { getGroundHeight, mapHalfExtent, spawn } = opts;
+    const { getGroundHeight, mapHalfExtent, spawn, combatSpaces } = opts;
     const half = mapHalfExtent * 0.72;
 
-    const depotSpots: Array<[number, number]> = [
-      [half * 0.55, half * 0.35],
-      [-half * 0.5, half * 0.45],
-      [half * 0.15, -half * 0.55],
-      [-half * 0.35, -half * 0.4],
-      [half * 0.65, -half * 0.15],
-    ];
+    const authoredDepots = (combatSpaces ?? []).filter((s) => s.kind === 'depot');
+    const authoredAa = (combatSpaces ?? []).filter((s) => s.kind === 'aa');
+
+    const depotSpots: Array<[number, number]> =
+      authoredDepots.length > 0
+        ? authoredDepots.map((s) => [s.center.x, s.center.z] as [number, number])
+        : [
+            [half * 0.55, half * 0.35],
+            [-half * 0.5, half * 0.45],
+            [half * 0.15, -half * 0.55],
+            [-half * 0.35, -half * 0.4],
+            [half * 0.65, -half * 0.15],
+          ];
 
     for (const [x, z] of depotSpots) {
       if (Math.hypot(x - spawn.x, z - spawn.z) < 28) continue;
@@ -349,10 +364,19 @@ export class EnemySystem {
 
     const turretCount = 8;
     for (let i = 0; i < turretCount; i++) {
-      const t = (i / turretCount) * Math.PI * 2 + 0.4;
-      const r = half * (0.4 + (i % 3) * 0.12);
-      const x = Math.cos(t) * r;
-      const z = Math.sin(t) * r;
+      let x: number;
+      let z: number;
+      if (i < authoredAa.length) {
+        const space = authoredAa[i];
+        const a = (i / Math.max(1, authoredAa.length)) * Math.PI * 2;
+        x = space.center.x + Math.cos(a) * space.radius * 0.55;
+        z = space.center.z + Math.sin(a) * space.radius * 0.55;
+      } else {
+        const t = (i / turretCount) * Math.PI * 2 + 0.4;
+        const r = half * (0.4 + (i % 3) * 0.12);
+        x = Math.cos(t) * r;
+        z = Math.sin(t) * r;
+      }
       if (Math.hypot(x - spawn.x, z - spawn.z) < 22) continue;
       const y = getGroundHeight(x, z);
       this.addEnemy('turret', new THREE.Vector3(x, y, z), {

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { COLORS, createSunsetSkyDome, createSunDisc } from '../scene/setup';
+import { createEnvironmentLayer, type EnvironmentLayer } from './environmentLayer';
 
 /** Target play-area width (largest XZ extent after scale), in world units */
 export const MAP_TARGET_SIZE = 260;
@@ -28,6 +29,8 @@ export interface WorldObjects {
   sky: THREE.Mesh;
   /** Procedural sun disc + flare */
   sunDisc: THREE.Group;
+  /** Higher-detail procedural environment dressing over Fruzer */
+  environment: EnvironmentLayer;
 }
 
 function createSkyDome(): THREE.Mesh {
@@ -625,6 +628,14 @@ export async function loadMapWorld(
   landingPad.position.set(open.x, open.groundY + 0.12, open.z);
   group.add(landingPad);
 
+  // Procedural environment layer — keeps licensed Fruzer GLB, adds density
+  const environment = createEnvironmentLayer({
+    getGroundHeight,
+    mapHalfExtent,
+    spawn: spawnPosition,
+    parent: group,
+  });
+
   scene.add(group);
 
   draco.dispose();
@@ -641,6 +652,7 @@ export async function loadMapWorld(
     bounds,
     sky,
     sunDisc,
+    environment,
   };
 }
 
