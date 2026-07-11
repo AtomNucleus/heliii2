@@ -36,6 +36,10 @@ let mobileControls: MobileControls;
 let phase: GamePhase = 'loading';
 let clock = new THREE.Clock();
 let ready = false;
+/** Projectile mesh UUIDs that already played spawn crack. */
+const heardBolts = new Set<string>();
+/** Throttle inbound whoosh per bolt. */
+const whooshBolts = new Set<string>();
 
 function setLoadingText(msg: string) {
   if (loadingStatus) loadingStatus.textContent = msg;
@@ -68,6 +72,8 @@ function startGame() {
   controller.reset(world.spawnPosition);
   controller.enabled = true;
   fx.resetTrail();
+  heardBolts.clear();
+  whooshBolts.clear();
   startOverlay.classList.add('hidden');
   completeOverlay.classList.add('hidden');
   hud.resetVisuals();
@@ -77,6 +83,7 @@ function startGame() {
   hud.toast('STRIKE RUN · DESTROY THE DEPOTS', 2.2);
   mobileControls.show();
   void audio.resume();
+  audio.setMusicIntensity('patrol');
   audio.playStart();
   audio.startFlightAmbience();
   clock.start();
@@ -201,11 +208,79 @@ function animate() {
       controller.addCameraShake(impulse.trauma);
     }
     syncHud();
+    const hudState = mission.getHudState();
     audio.updateFlight({
       speed,
       altitude,
       throttle: Math.min(1, speed / 55),
       boosting: controller.isBoosting(),
+      verticalSpeed: state.velocity.y,
+      healthRatio: hudState.health / Math.max(1, hudState.healthMax),
+      aimLocked: hudState.aimLocked,
+      position: { x: heli.position.x, y: heli.position.y, z: heli.position.z },
+      velocity: {
+        x: state.velocity.x,
+        y: state.velocity.y,
+        z: state.velocity.z,
+      },
+    });
+
+    // Spatial world: drone flybys + inbound AA whoosh / cracks
+    const hostiles = mission.enemies.enemies
+      .filter((e) => e.alive && e.kind === 'drone')
+      .map((e) => ({
+        id: e.id,
+        x: e.position.x,
+        y: e.position.y,
+        z: e.position.z,
+      }));
+    const inbound = [];
+    for (const p of mission.weapons.activeProjectiles) {
+      if (!p.alive || p.fromPlayer) continue;
+      const id = p.mesh.uuid;
+      const pt = {
+        x: p.mesh.position.x,
+        y: p.mesh.position.y,
+        z: p.mesh.position.z,
+        vx: p.velocity.x,
+        vy: p.velocity.y,
+        vz: p.velocity.z,
+      };
+      if (!heardBolts.has(id)) {
+        heardBolts.add(id);
+        audio.playAaFire(pt);
+      }
+      const dx = pt.x - heli.position.x;
+      const dy = pt.y - heli.position.y;
+      const dz = pt.z - heli.position.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < 18 * 18 && !whooshBolts.has(id)) {
+        whooshBolts.add(id);
+        inbound.push(pt);
+      }
+    }
+    // Prune dead bolt ids occasionally
+    if (heardBolts.size > 64) {
+      const live = new Set(
+        mission.weapons.activeProjectiles.map((p) => p.mesh.uuid),
+      );
+      for (const id of [...heardBolts]) {
+        if (!live.has(id)) heardBolts.delete(id);
+      }
+      for (const id of [...whooshBolts]) {
+        if (!live.has(id)) whooshBolts.delete(id);
+      }
+    }
+    audio.updateWorld({
+      dt,
+      listener: { x: heli.position.x, y: heli.position.y, z: heli.position.z },
+      listenerVelocity: {
+        x: state.velocity.x,
+        y: state.velocity.y,
+        z: state.velocity.z,
+      },
+      hostiles,
+      inbound,
     });
 
     if (outcome !== 'playing' && mission.summary) {
@@ -300,22 +375,38 @@ async function boot() {
         case 'fire':
           audio.playWeaponFire();
           break;
-        case 'hit':
+        case 'hit': {
           hud.setCrosshairState('hit', 180);
-          audio.playWeaponHit();
+          const hp = event.enemy.position;
+          audio.playWeaponHit({ x: hp.x, y: hp.y, z: hp.z });
           break;
-        case 'kill':
+        }
+        case 'kill': {
           hud.setCrosshairState('hit', 260);
-          audio.playExplosion();
+          const kp = event.enemy.position;
+          audio.playExplosion(event.primary ? 1.35 : 1, {
+            x: kp.x,
+            y: kp.y,
+            z: kp.z,
+          });
           audio.playCombo(event.combo);
-          if (event.primary) hud.toast(`DEPOT DOWN · +${event.points}`, 1.5);
+          if (event.primary) {
+            hud.toast(`DEPOT DOWN · +${event.points}`, 1.5);
+            audio.playRadio('depot-down', 'DEPOT DOWN');
+            audio.setMusicIntensity('combat');
+          } else {
+            audio.playRadio('target-down', 'SPLASH');
+          }
           break;
+        }
         case 'damage':
           hud.flashDamage(event.amount / 20);
           audio.playDamage();
           controller.addCameraShake(Math.min(0.8, event.amount / 30));
           if (event.remaining <= 30 && event.remaining > 0) {
             hud.toast('HULL CRITICAL', 1.2);
+            audio.playRadio('hull-critical', 'HULL CRITICAL');
+            audio.setMusicIntensity('critical');
           }
           break;
         case 'ring':
@@ -325,6 +416,8 @@ async function boot() {
           break;
         case 'nearMiss':
           hud.toast(`NEAR MISS · +${event.points}`, 0.9);
+          audio.playRadio('near-miss', 'NEAR MISS');
+          audio.playWarning('incoming');
           break;
         case 'toast':
           hud.toast(event.message);
