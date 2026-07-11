@@ -16,6 +16,8 @@ export interface RendererInitInfo {
   reason: string;
   /** Three.js revision string when available. */
   revision: string;
+  /** Successful WebGL context ladder rung id when backend is webgl. */
+  webglAttempt?: string;
 }
 
 export interface GameRendererHandle {

@@ -11,7 +11,16 @@ import { MetaPanel } from './hud/metaPanel';
 import { VisualEffects } from './effects/visualEffects';
 import { getGameAudio } from './audio';
 import { StrikeMission, formatEndSubtitle, isStrictNewBest, type StrikeEndSummary } from './mission';
-import { applyRendererDiagnostics } from './render';
+import {
+  applyRendererDiagnostics,
+  applyRendererFailureDiagnostics,
+  armWebGLRecovery,
+  buildAutomaticRecoveryUrl,
+  buildCompatibilityModeUrl,
+  canAttemptWebGLRecovery,
+  clearWebGLRecovery,
+  stripRecoveryQueryParams,
+} from './render';
 import { ensureSharedDebrisPhysics, getSharedDebrisPhysics, setSharedDebrisPhysics } from './physics';
 import { initPwa, type PwaController } from './pwa';
 import {
@@ -70,6 +79,92 @@ const whooshBolts = new Set<string>();
 
 function setLoadingText(msg: string) {
   if (loadingStatus) loadingStatus.textContent = msg;
+}
+
+function readSessionSafe(key: string): string | null {
+  try {
+    return window.sessionStorage?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionSafe(key: string, value: string): void {
+  try {
+    window.sessionStorage?.setItem(key, value);
+  } catch {
+    // Ignore quota / private-mode failures; URL marker still guards loops.
+  }
+}
+
+function removeSessionSafe(key: string): void {
+  try {
+    window.sessionStorage?.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
+/** Manual RETRY: explicit WebGL + transient recovery marker for the reload. */
+function reloadIntoCompatibilityMode(): void {
+  armWebGLRecovery(writeSessionSafe);
+  const next = buildCompatibilityModeUrl(window.location.href, {
+    includeRecoveryMarker: true,
+  });
+  window.location.replace(next);
+}
+
+/**
+ * Automatic post-WebGPU recovery: session + `webglRecovery=1` only.
+ * Does not pin `renderer=webgl` in the visible URL for future sessions.
+ */
+function reloadIntoAutomaticRecovery(): void {
+  armWebGLRecovery(writeSessionSafe);
+  window.location.replace(buildAutomaticRecoveryUrl(window.location.href));
+}
+
+/**
+ * After the full WebGL graphics stack succeeds, drop the transient recovery
+ * guard so future visits can reassess. Keeps any user-authored `renderer=`.
+ */
+function clearTransientRecoveryAfterGraphicsReady(): void {
+  clearWebGLRecovery(removeSessionSafe);
+  const cleaned = stripRecoveryQueryParams(window.location.href);
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (cleaned !== current) {
+    history.replaceState(null, '', cleaned);
+  }
+}
+
+function presentGraphicsFailure(err: unknown, stage: string): void {
+  const reason = err instanceof Error ? err.message : String(err);
+  console.error(`[graphics:${stage}]`, err);
+  applyRendererFailureDiagnostics(appRoot, { stage, reason });
+  setLoadingText(
+    'Graphics failed to start. Retry in compatibility mode (classic WebGL), or refresh.',
+  );
+  startBtn.disabled = false;
+  startBtn.textContent = 'RETRY COMPATIBILITY MODE';
+  startBtn.dataset.graphicsRetry = 'compatibility';
+}
+
+/**
+ * One-time same-page recovery when WebGPU renderer init succeeded but the
+ * TSL / VisualEffects stack failed before gameplay committed.
+ */
+function tryRecoverFromWebGpuSetupFailure(err: unknown, stage: string): boolean {
+  if (!canAttemptWebGLRecovery(window.location.search, readSessionSafe)) {
+    return false;
+  }
+  applyRendererFailureDiagnostics(appRoot, {
+    stage,
+    reason: err instanceof Error ? err.message : String(err),
+  });
+  setLoadingText('Switching to compatibility mode (WebGL)…');
+  startBtn.disabled = true;
+  startBtn.textContent = 'LOADING…';
+  reloadIntoAutomaticRecovery();
+  return true;
 }
 
 function applySettingsToRuntime(settings: SettingsState) {
@@ -232,6 +327,11 @@ function setPaused(paused: boolean) {
 
 startBtn.disabled = true;
 startBtn.addEventListener('click', () => {
+  if (startBtn.dataset.graphicsRetry === 'compatibility') {
+    audio.playUISelect();
+    reloadIntoCompatibilityMode();
+    return;
+  }
   if (phase === 'start') {
     audio.playUIConfirm();
     startGame();
@@ -769,10 +869,30 @@ async function main() {
   try {
     sceneSetup = await createSceneSetup(canvas);
     applyRendererDiagnostics(appRoot, sceneSetup.rendererInfo);
+
     scene = sceneSetup.scene;
     camera = sceneSetup.camera;
     sunLight = sceneSetup.sunLight;
-    fx = new VisualEffects(sceneSetup);
+
+    try {
+      fx = new VisualEffects(sceneSetup);
+    } catch (fxErr) {
+      if (
+        sceneSetup.rendererInfo.backend === 'webgpu'
+        && !ready
+        && !rendererReady
+        && tryRecoverFromWebGpuSetupFailure(fxErr, 'visual-effects')
+      ) {
+        return;
+      }
+      throw fxErr;
+    }
+
+    // Full graphics stack (renderer + VisualEffects) succeeded — drop transient recovery.
+    if (sceneSetup.rendererInfo.backend === 'webgl') {
+      clearTransientRecoveryAfterGraphicsReady();
+    }
+
     applySettingsToRuntime(getProfile().settings);
 
     sunLight.target.position.set(0, 0, 0);
@@ -787,14 +907,15 @@ async function main() {
       `[renderer] backend=${sceneSetup.rendererInfo.backend}`
         + ` preference=${sceneSetup.rendererInfo.preference}`
         + ` reason=${sceneSetup.rendererInfo.reason}`
+        + (sceneSetup.rendererInfo.webglAttempt
+          ? ` webglAttempt=${sceneSetup.rendererInfo.webglAttempt}`
+          : '')
         + ` three=r${sceneSetup.rendererInfo.revision}`,
     );
 
     await boot();
   } catch (err) {
-    console.error(err);
-    setLoadingText('Failed to initialize renderer. Check console / refresh.');
-    startBtn.textContent = 'LOAD FAILED';
+    presentGraphicsFailure(err, 'renderer-init');
   }
 }
 

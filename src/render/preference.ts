@@ -3,6 +3,12 @@
  * Kept free of Three.js / DOM so unit tests can exercise selection logic.
  */
 
+import {
+  preferWebGLForStability,
+  type DeviceCapabilitySignals,
+} from './deviceCapability';
+import { hasWebGLRecoveryLoopGuard } from './recovery';
+
 export type RendererPreference = 'auto' | 'webgpu' | 'webgl';
 
 export type RendererBackend = 'webgpu' | 'webgl';
@@ -22,12 +28,20 @@ export function getRendererStorageKey(): string {
  * - `?forceWebGL=1` → webgl
  * - `?webgl=1` → webgl
  *
+ * Transient recovery (session `heli.webglRecovery` or `?webglRecovery=1`) forces
+ * webgl for this boot and overrides other preference sources until cleared.
  * localStorage key `heli.renderer` = `webgl` | `webgpu` when query is absent.
  */
 export function resolveRendererPreference(
   search: string,
   storageGet?: (key: string) => string | null,
+  sessionGet?: (key: string) => string | null,
 ): RendererPreference {
+  // Keep forced through full graphics-stack init while the loop guard is live.
+  if (hasWebGLRecoveryLoopGuard(search, sessionGet)) {
+    return 'webgl';
+  }
+
   const raw = search.startsWith('?') ? search.slice(1) : search;
   const params = new URLSearchParams(raw);
 
@@ -46,8 +60,19 @@ export function resolveRendererPreference(
   return 'auto';
 }
 
-export function shouldAttemptWebGPU(preference: RendererPreference): boolean {
-  return preference === 'auto' || preference === 'webgpu';
+/**
+ * Whether to attempt WebGPU for this preference.
+ * Explicit `webgpu` always attempts; `webgl` never does.
+ * In `auto`, phone/coarse/mobile-like environments prefer classic WebGL.
+ */
+export function shouldAttemptWebGPU(
+  preference: RendererPreference,
+  signals?: DeviceCapabilitySignals,
+): boolean {
+  if (preference === 'webgl') return false;
+  if (preference === 'webgpu') return true;
+  if (signals && preferWebGLForStability(signals)) return false;
+  return true;
 }
 
 /** Whether the environment exposes the WebGPU entry point (not a full adapter probe). */

@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import {
+  preferWebGLForStability,
+  readDeviceCapabilitySignals,
+  type DeviceCapabilitySignals,
+} from './deviceCapability';
+import {
   hasWebGPUEntry,
   resolveRendererPreference,
   shouldAttemptWebGPU,
@@ -7,6 +12,7 @@ import {
 } from './preference';
 import { setActiveRendererBackend } from './runtime';
 import type { GameRendererHandle, RendererInitInfo } from './types';
+import { webglContextFallbackLadder, type WebGLContextAttempt } from './webglFallback';
 
 export interface CreateGameRendererOptions {
   canvas: HTMLCanvasElement;
@@ -14,7 +20,19 @@ export interface CreateGameRendererOptions {
   search?: string;
   /** Override storage reader (defaults to localStorage). */
   storageGet?: (key: string) => string | null;
+  /** Override session storage reader (defaults to sessionStorage). */
+  sessionGet?: (key: string) => string | null;
+  /** Override device capability signals (defaults to live browser read). */
+  deviceSignals?: DeviceCapabilitySignals;
+  /**
+   * @deprecated Ladder owns antialias / powerPreference. Kept for API compat;
+   * ignored when the fallback ladder runs.
+   */
   antialias?: boolean;
+  /**
+   * @deprecated Ladder owns antialias / powerPreference. Kept for API compat;
+   * ignored when the fallback ladder runs.
+   */
   powerPreference?: 'high-performance' | 'low-power' | 'default';
 }
 
@@ -22,9 +40,7 @@ type GpuNavigator = Navigator & {
   gpu?: {
     requestAdapter: (options?: {
       powerPreference?: 'high-performance' | 'low-power';
-    }) => Promise<{
-      requestDevice: () => Promise<{ destroy?: () => void }>;
-    } | null>;
+    }) => Promise<unknown | null>;
   };
 };
 
@@ -36,11 +52,20 @@ function readStorage(key: string): string | null {
   }
 }
 
+function readSession(key: string): string | null {
+  try {
+    return window.sessionStorage?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function baseInfo(
   preference: RendererPreference,
   backend: RendererInitInfo['backend'],
   fellBack: boolean,
   reason: string,
+  webglAttempt?: string,
 ): RendererInitInfo {
   return {
     backend,
@@ -48,6 +73,7 @@ function baseInfo(
     fellBack,
     reason,
     revision: THREE.REVISION,
+    ...(webglAttempt ? { webglAttempt } : {}),
   };
 }
 
@@ -76,8 +102,8 @@ function configureCommon(renderer: {
 }
 
 /**
- * Probe WebGPU without binding the game canvas. Avoids leaving a GPU/WebGL
- * context on the display canvas when we later need classic WebGLRenderer.
+ * Probe WebGPU via adapter only — do not request a GPUDevice that we immediately
+ * destroy (avoids extra device churn before Three creates the real one).
  */
 async function probeWebGPU(
   powerPreference: 'high-performance' | 'low-power' | 'default',
@@ -88,10 +114,7 @@ async function probeWebGPU(
     const adapter = await gpu.requestAdapter(
       powerPreference === 'default' ? undefined : { powerPreference },
     );
-    if (!adapter) return false;
-    const device = await adapter.requestDevice();
-    device.destroy?.();
-    return true;
+    return adapter != null;
   } catch {
     return false;
   }
@@ -113,48 +136,78 @@ function replaceCanvas(canvas: HTMLCanvasElement): HTMLCanvasElement {
   return next;
 }
 
+function tryCreateWebGLRenderer(
+  canvas: HTMLCanvasElement,
+  attempt: WebGLContextAttempt,
+): THREE.WebGLRenderer {
+  return new THREE.WebGLRenderer({
+    canvas,
+    antialias: attempt.antialias,
+    powerPreference: attempt.powerPreference,
+    stencil: false,
+  });
+}
+
 function createWebGLHandle(
   canvas: HTMLCanvasElement,
   preference: RendererPreference,
   fellBack: boolean,
   reason: string,
-  antialias: boolean,
-  powerPreference: 'high-performance' | 'low-power' | 'default',
+  mobileStable: boolean,
 ): GameRendererHandle {
+  const ladder = webglContextFallbackLadder({ mobileStable });
   let target = canvas;
-  let renderer: THREE.WebGLRenderer;
-  try {
-    renderer = new THREE.WebGLRenderer({
-      canvas: target,
-      antialias,
-      powerPreference,
-      stencil: false,
-    });
-  } catch (err) {
-    console.warn('[renderer] WebGL on existing canvas failed, replacing canvas:', err);
-    target = replaceCanvas(canvas);
-    renderer = new THREE.WebGLRenderer({
-      canvas: target,
-      antialias,
-      powerPreference,
-      stencil: false,
-    });
+  let lastError: unknown;
+
+  for (let i = 0; i < ladder.length; i++) {
+    const attempt = ladder[i]!;
+    if (i > 0) {
+      target = replaceCanvas(target);
+    }
+    try {
+      const renderer = tryCreateWebGLRenderer(target, attempt);
+      configureCommon(renderer);
+      const info = baseInfo(preference, 'webgl', fellBack, reason, attempt.id);
+      setActiveRendererBackend('webgl');
+      console.info(`[renderer] WebGL context ok attempt=${attempt.id} reason=${reason}`);
+      return {
+        renderer,
+        info,
+        isWebGLRenderer: true,
+        isWebGPURenderer: false,
+      };
+    } catch (err) {
+      lastError = err;
+      console.warn(`[renderer] WebGL attempt ${attempt.id} failed:`, err);
+    }
   }
-  configureCommon(renderer);
-  const info = baseInfo(preference, 'webgl', fellBack, reason);
-  setActiveRendererBackend('webgl');
-  return {
-    renderer,
-    info,
-    isWebGLRenderer: true,
-    isWebGPURenderer: false,
-  };
+
+  const message =
+    lastError instanceof Error ? lastError.message : String(lastError ?? 'unknown');
+  throw new Error(
+    `WebGL2 initialization failed after ${ladder.length} attempts (${message}). `
+      + 'This device/browser does not appear to support WebGL2.',
+  );
+}
+
+function webglPolicyReason(
+  preference: RendererPreference,
+  signals: DeviceCapabilitySignals,
+): string {
+  if (preference === 'webgl') return 'forced-webgl';
+  if (preference === 'auto' && preferWebGLForStability(signals)) {
+    return 'mobile-stability-policy';
+  }
+  return 'webgl-selected';
 }
 
 /**
  * Prefer WebGPU when the browser supports it and init succeeds with a real
  * WebGPU backend. Otherwise use classic WebGLRenderer so EffectComposer +
  * ShaderMaterial paths keep working.
+ *
+ * In `auto` on phone/coarse/mobile-like environments, prefer classic WebGL
+ * for stability. Explicit `?renderer=webgpu` still attempts WebGPU.
  */
 export async function createGameRenderer(
   options: CreateGameRendererOptions,
@@ -163,32 +216,32 @@ export async function createGameRenderer(
     canvas,
     search = typeof window !== 'undefined' ? window.location.search : '',
     storageGet = readStorage,
-    antialias = true,
-    powerPreference = 'high-performance',
+    sessionGet = readSession,
+    deviceSignals = readDeviceCapabilitySignals(),
   } = options;
 
-  const preference = resolveRendererPreference(search, storageGet);
+  const preference = resolveRendererPreference(search, storageGet, sessionGet);
+  const mobileStable = preferWebGLForStability(deviceSignals);
 
-  if (!shouldAttemptWebGPU(preference)) {
+  if (!shouldAttemptWebGPU(preference, deviceSignals)) {
     return createWebGLHandle(
       canvas,
       preference,
       false,
-      'forced-webgl',
-      antialias,
-      powerPreference,
+      webglPolicyReason(preference, deviceSignals),
+      mobileStable,
     );
   }
 
-  const webgpuReady = await probeWebGPU(powerPreference);
+  // Desktop / explicit WebGPU: probe adapter only, then init Three's renderer.
+  const webgpuReady = await probeWebGPU(mobileStable ? 'default' : 'high-performance');
   if (!webgpuReady) {
     return createWebGLHandle(
       canvas,
       preference,
       preference === 'webgpu',
       'webgpu-unavailable',
-      antialias,
-      powerPreference,
+      mobileStable,
     );
   }
 
@@ -196,8 +249,8 @@ export async function createGameRenderer(
     const { WebGPURenderer } = await import('three/webgpu');
     const renderer = new WebGPURenderer({
       canvas,
-      antialias,
-      powerPreference: powerPreference === 'default' ? undefined : powerPreference,
+      antialias: !mobileStable,
+      powerPreference: mobileStable ? undefined : 'high-performance',
       stencil: false,
     });
     await renderer.init();
@@ -224,8 +277,7 @@ export async function createGameRenderer(
       preference,
       true,
       'webgpu-renderer-webgl2-fallback',
-      antialias,
-      powerPreference,
+      mobileStable,
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -236,8 +288,7 @@ export async function createGameRenderer(
       preference,
       true,
       'webgpu-init-failed',
-      antialias,
-      powerPreference,
+      mobileStable,
     );
   }
 }

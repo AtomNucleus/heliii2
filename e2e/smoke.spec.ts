@@ -19,7 +19,8 @@ function isIgnorablePageError(message: string): boolean {
     text.includes('extension') ||
     text.includes('not supported') ||
     text.includes('precision') ||
-    text.includes('adapter')
+    text.includes('adapter') ||
+    text.includes('compatibility mode')
   );
 }
 
@@ -54,6 +55,36 @@ async function expectShellVisible(page: Page) {
   await expect(page.locator('#loading-status')).toBeAttached();
 }
 
+/**
+ * Wait for boot to leave LOADING… then assert we never leave users on bare LOAD FAILED
+ * without a compatibility retry affordance for graphics failures.
+ */
+async function expectBootSettledWithoutBareLoadFailed(page: Page) {
+  const startBtn = page.locator('#start-btn');
+  const loading = page.locator('#loading-status');
+
+  await expect
+    .poll(async () => (await startBtn.textContent())?.trim() ?? '', { timeout: 90_000 })
+    .not.toMatch(/^LOADING/i);
+
+  const btnText = ((await startBtn.textContent()) ?? '').trim();
+  const statusText = ((await loading.textContent()) ?? '').trim();
+
+  // Bare LOAD FAILED without retry is the phone boot bug we must catch.
+  expect(btnText, `Start button stuck on LOAD FAILED (status: ${statusText})`).not.toMatch(
+    /^LOAD FAILED$/i,
+  );
+
+  if (/RETRY COMPATIBILITY MODE/i.test(btnText)) {
+    await expect(page.locator('#app')).toHaveAttribute('data-renderer-error-stage', /.+/);
+    await expect(loading).toContainText(/compatibility mode/i);
+    await expect(startBtn).toBeEnabled();
+    return 'compat-retry' as const;
+  }
+
+  return 'ready-or-partial' as const;
+}
+
 test.describe('HELI SUNSET smoke', () => {
   test('game shell boots without unexpected page errors', async ({ page }) => {
     test.setTimeout(120_000);
@@ -63,16 +94,19 @@ test.describe('HELI SUNSET smoke', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expectShellVisible(page);
 
-    // Prefer a fully ready shell when assets + renderer succeed; otherwise still require shell DOM.
+    const settled = await expectBootSettledWithoutBareLoadFailed(page);
     const startBtn = page.locator('#start-btn');
-    try {
-      await expect(startBtn).toBeEnabled({ timeout: 60_000 });
-      await expect(startBtn).toContainText(/START OPERATION|START|BEGIN|FLY|ENGAGE|LAUNCH/i);
-    } catch {
-      // Headless WebGL or slow asset path may block readiness; shell must still be present.
-      await expect(page.locator('#start-overlay')).toBeVisible();
-      await expect(page.locator('#app')).toBeVisible();
-      await expect(page.getByRole('heading', { name: /HELI\s*SUNSET/i })).toBeVisible();
+
+    if (settled === 'ready-or-partial') {
+      try {
+        await expect(startBtn).toBeEnabled({ timeout: 30_000 });
+        await expect(startBtn).toContainText(/START OPERATION|START|BEGIN|FLY|ENGAGE|LAUNCH/i);
+      } catch {
+        // Headless WebGL or slow asset path may block readiness; shell must still be present.
+        await expect(page.locator('#start-overlay')).toBeVisible();
+        await expect(page.locator('#app')).toBeVisible();
+        await expect(page.getByRole('heading', { name: /HELI\s*SUNSET/i })).toBeVisible();
+      }
     }
 
     expect(pageErrors, `Unexpected page errors:\n${pageErrors.join('\n')}`).toEqual([]);
@@ -92,14 +126,95 @@ test.describe('HELI SUNSET smoke', () => {
       timeout: 60_000,
     });
     await expect(page.locator('#app')).toHaveAttribute('data-renderer-preference', 'webgl');
+    await expect(page.locator('#app')).toHaveAttribute('data-renderer-webgl-attempt', /.+/);
     await expect(page.locator('#game-canvas')).toHaveAttribute('data-renderer-backend', 'webgl');
 
+    const settled = await expectBootSettledWithoutBareLoadFailed(page);
     const startBtn = page.locator('#start-btn');
-    try {
-      await expect(startBtn).toBeEnabled({ timeout: 60_000 });
-      await expect(startBtn).toContainText(/START OPERATION|START|BEGIN|FLY|ENGAGE|LAUNCH/i);
-    } catch {
-      await expect(page.locator('#app')).toHaveAttribute('data-renderer-backend', 'webgl');
+
+    if (settled === 'ready-or-partial') {
+      try {
+        await expect(startBtn).toBeEnabled({ timeout: 30_000 });
+        await expect(startBtn).toContainText(/START OPERATION|START|BEGIN|FLY|ENGAGE|LAUNCH/i);
+      } catch {
+        await expect(page.locator('#app')).toHaveAttribute('data-renderer-backend', 'webgl');
+      }
+    }
+
+    expect(pageErrors, `Unexpected page errors:\n${pageErrors.join('\n')}`).toEqual([]);
+    expect(consoleErrors, `Unexpected console errors:\n${consoleErrors.join('\n')}`).toEqual([]);
+  });
+
+  test('compatibility retry button forces WebGL safely', async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const { pageErrors, consoleErrors } = attachErrorCollectors(page);
+
+    await page.goto('/?foo=keep&renderer=webgpu#frag', { waitUntil: 'domcontentloaded' });
+    await expectShellVisible(page);
+
+    // Wait for the real boot path to leave LOADING so our simulated failure UI is not overwritten.
+    const startBtn = page.locator('#start-btn');
+    await expect
+      .poll(async () => (await startBtn.textContent())?.trim() ?? '', { timeout: 90_000 })
+      .not.toMatch(/^LOADING/i);
+
+    // Simulate graphics failure UI (same path as presentGraphicsFailure).
+    await page.evaluate(() => {
+      const app = document.getElementById('app');
+      const btn = document.getElementById('start-btn') as HTMLButtonElement | null;
+      const status = document.getElementById('loading-status');
+      if (app) {
+        app.dataset.rendererErrorStage = 'renderer-init';
+        app.dataset.rendererErrorReason = 'simulated-webgpu-post-failure';
+      }
+      if (status) {
+        status.textContent =
+          'Graphics failed to start. Retry in compatibility mode (classic WebGL), or refresh.';
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'RETRY COMPATIBILITY MODE';
+        btn.dataset.graphicsRetry = 'compatibility';
+      }
+    });
+
+    await expect(page.locator('#start-btn')).toContainText(/RETRY COMPATIBILITY MODE/i);
+    await expect(page.locator('#app')).toHaveAttribute(
+      'data-renderer-error-stage',
+      'renderer-init',
+    );
+
+    await Promise.all([
+      page.waitForURL(/renderer=webgl/, { timeout: 30_000 }),
+      page.locator('#start-btn').click(),
+    ]);
+
+    // Landing URL from manual RETRY includes explicit WebGL + transient marker.
+    {
+      const url = new URL(page.url());
+      expect(url.searchParams.get('renderer')).toBe('webgl');
+      expect(url.searchParams.get('foo')).toBe('keep');
+      expect(url.searchParams.get('webglRecovery')).toBe('1');
+      expect(url.hash).toBe('#frag');
+    }
+
+    await expectShellVisible(page);
+    await expect(page.locator('#app')).toHaveAttribute('data-renderer-backend', 'webgl', {
+      timeout: 60_000,
+    });
+    await expect(page.locator('#app')).toHaveAttribute('data-renderer-preference', 'webgl');
+
+    // After full graphics stack succeeds, recovery marker is stripped; user-authored
+    // renderer=webgl from RETRY remains.
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('webglRecovery'), { timeout: 60_000 })
+      .toBeNull();
+    {
+      const settled = new URL(page.url());
+      expect(settled.searchParams.get('renderer')).toBe('webgl');
+      expect(settled.searchParams.get('foo')).toBe('keep');
+      expect(settled.hash).toBe('#frag');
     }
 
     expect(pageErrors, `Unexpected page errors:\n${pageErrors.join('\n')}`).toEqual([]);
