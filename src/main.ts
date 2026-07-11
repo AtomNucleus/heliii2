@@ -9,15 +9,15 @@ import { HUD } from './hud/hud';
 import { MobileControls } from './hud/mobileControls';
 import { VisualEffects } from './effects/visualEffects';
 import { getGameAudio } from './audio';
+import { CombatMission, type MissionEndSummary } from './combat';
 
-type GamePhase = 'loading' | 'start' | 'playing' | 'complete';
+type GamePhase = 'loading' | 'start' | 'playing' | 'complete' | 'failed';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const startOverlay = document.getElementById('start-overlay')!;
 const completeOverlay = document.getElementById('complete-overlay')!;
 const startBtn = document.getElementById('start-btn') as HTMLButtonElement;
 const restartBtn = document.getElementById('restart-btn')!;
-const finalTimeEl = document.getElementById('final-time')!;
 const loadingStatus = document.getElementById('loading-status');
 
 const sceneSetup = createSceneSetup(canvas);
@@ -28,34 +28,53 @@ const audio = getGameAudio();
 let world: WorldObjects;
 let controller: HelicopterController;
 let checkpoints: CheckpointSystem;
+let mission: CombatMission;
 let hud: HUD;
 let heli: THREE.Group;
 let mobileControls: MobileControls;
 
 let phase: GamePhase = 'loading';
-let elapsed = 0;
 let clock = new THREE.Clock();
 let ready = false;
-let lastRingCount = 0;
 
 function setLoadingText(msg: string) {
   if (loadingStatus) loadingStatus.textContent = msg;
 }
 
+function syncHud() {
+  const state = mission.getHudState();
+  hud.updateCombat({
+    time: state.time,
+    speed: controller.getSpeed(),
+    altitude: controller.getAltitude(),
+    health: state.health,
+    healthMax: state.healthMax,
+    score: state.score,
+    combo: state.combo,
+    multiplier: state.multiplier,
+    targetsLeft: state.targetsLeft,
+    targetsTotal: state.targetsTotal,
+    rings: state.rings,
+    ringsTotal: state.ringsTotal,
+    weaponReady: state.weaponReady,
+  });
+  hud.setCrosshairState(state.aimLocked ? 'lock' : 'idle');
+}
+
 function startGame() {
   if (!ready || phase === 'loading') return;
   phase = 'playing';
-  elapsed = 0;
-  lastRingCount = 0;
-  checkpoints.reset();
+  mission.reset();
   controller.reset(world.spawnPosition);
   controller.enabled = true;
   fx.resetTrail();
   startOverlay.classList.add('hidden');
   completeOverlay.classList.add('hidden');
   hud.resetVisuals();
+  hud.enableCombatHud(true);
   hud.show();
-  hud.update(0, 0, controller.getAltitude(), 0);
+  syncHud();
+  hud.toast('STRIKE RUN · DESTROY THE DEPOTS', 2.2);
   mobileControls.show();
   void audio.resume();
   audio.playStart();
@@ -63,14 +82,22 @@ function startGame() {
   clock.start();
 }
 
-function completeGame() {
-  phase = 'complete';
+function finishMission(summary: MissionEndSummary) {
+  const won = summary.outcome === 'won';
+  phase = won ? 'complete' : 'failed';
   controller.enabled = false;
   mobileControls.hide();
   audio.stopFlightAmbience();
-  audio.playMissionComplete();
-  finalTimeEl.textContent = hud.formatTime(elapsed);
-  completeOverlay.classList.remove('hidden');
+  if (won) audio.playMissionComplete();
+  else audio.playMissionFailed();
+  hud.showComplete({
+    title: won ? 'MISSION COMPLETE' : 'HULL DESTROYED',
+    subtitle: won ? 'Fruzer strike successful' : 'Ejected over hostile territory',
+    score: summary.score,
+    time: summary.time,
+    kills: summary.kills,
+    combo: summary.bestCombo,
+  });
 }
 
 function restartGame() {
@@ -95,7 +122,10 @@ window.addEventListener('keydown', (e) => {
     audio.playUIConfirm();
     startGame();
   }
-  if (e.code === 'KeyR' && (phase === 'playing' || phase === 'complete')) {
+  if (
+    e.code === 'KeyR'
+    && (phase === 'playing' || phase === 'complete' || phase === 'failed')
+  ) {
     restartGame();
   }
 });
@@ -147,9 +177,9 @@ function animate() {
   sunLight.shadow.camera.updateProjectionMatrix();
 
   if (phase === 'playing') {
-    elapsed += dt;
-    checkpoints.tryCollect(heli.position);
-    hud.update(elapsed, speed, altitude, checkpoints.collectedCount);
+    const state = controller.getState();
+    const outcome = mission.update(dt, time, heli, state.yaw, state.velocity);
+    syncHud();
     audio.updateFlight({
       speed,
       altitude,
@@ -157,14 +187,8 @@ function animate() {
       boosting: controller.isBoosting(),
     });
 
-    if (checkpoints.collectedCount > lastRingCount) {
-      lastRingCount = checkpoints.collectedCount;
-      hud.pulseRingCollect();
-      audio.playRingCollect();
-    }
-
-    if (checkpoints.complete) {
-      completeGame();
+    if (outcome !== 'playing' && mission.summary) {
+      finishMission(mission.summary);
     }
   }
 
@@ -204,15 +228,71 @@ async function boot() {
       10,
     );
     checkpoints = new CheckpointSystem(scene, ringLayout);
+    mission = new CombatMission(
+      scene,
+      {
+        getGroundHeight: world.getGroundHeight,
+        mapHalfExtent: world.mapHalfExtent,
+        spawn: world.spawnPosition.clone(),
+      },
+      checkpoints,
+    );
     hud = new HUD(checkpoints.total);
+    hud.enableCombatHud(true);
     hud.bindMuteHandler((muted) => audio.setMuted(muted));
     hud.onWeaponReadyChange = (ready) => audio.notifyWeaponReady(ready);
+
+    mission.onEvent((event) => {
+      switch (event.type) {
+        case 'fire':
+          audio.playWeaponFire();
+          break;
+        case 'hit':
+          hud.setCrosshairState('hit', 180);
+          audio.playWeaponHit();
+          break;
+        case 'kill':
+          hud.setCrosshairState('hit', 260);
+          audio.playExplosion();
+          audio.playCombo(event.combo);
+          if (event.primary) hud.toast(`DEPOT DOWN · +${event.points}`, 1.5);
+          break;
+        case 'damage':
+          hud.flashDamage(event.amount / 20);
+          audio.playDamage();
+          controller.addCameraShake(Math.min(0.8, event.amount / 30));
+          if (event.remaining <= 30 && event.remaining > 0) {
+            hud.toast('HULL CRITICAL', 1.2);
+          }
+          break;
+        case 'ring':
+          hud.pulseRingCollect();
+          audio.playRingCollect();
+          hud.toast(`RING · +${event.points} · HULL +8`, 1.2);
+          break;
+        case 'nearMiss':
+          hud.toast(`NEAR MISS · +${event.points}`, 0.9);
+          break;
+        case 'toast':
+          hud.toast(event.message);
+          break;
+      }
+    });
+
+    controller.onImpact = (intensity, damage) => {
+      if (damage > 0) mission.applyExternalDamage(damage, 'hard-landing');
+      audio.playImpact(intensity, damage > 8 ? 'crash' : 'hard');
+    };
+
     mobileControls = new MobileControls({
       setInput: (input) => controller.setTouchInput(input),
       clearInput: () => controller.clearTouchInput(),
       onRestart: () => {
-        if (phase === 'playing') restartGame();
+        if (phase === 'playing' || phase === 'complete' || phase === 'failed') {
+          restartGame();
+        }
       },
+      onFireChange: (held) => mission.weapons.setFireHeld(held),
       onUiTap: () => audio.playUISelect(),
     });
 
@@ -220,7 +300,7 @@ async function boot() {
     phase = 'start';
     setLoadingText('');
     startBtn.disabled = false;
-    startBtn.textContent = 'START FLIGHT';
+    startBtn.textContent = 'START STRIKE';
   } catch (err) {
     console.error(err);
     setLoadingText('Failed to load map. Check console / refresh.');
