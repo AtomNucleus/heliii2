@@ -10,6 +10,7 @@ import { getPhaseDef } from './phases';
 import { MissionDirector, actForPhase } from './director';
 import { RadioChatter, RADIO_SCRIPTS } from './radio';
 import { ObjectiveMarkers } from './markers';
+import type { QualitySettings } from '../effects/quality';
 import {
   makeWaveContext,
   spawnAmbientThreats,
@@ -135,6 +136,14 @@ export class StrikeMission {
     });
 
     this.checkpointPos.copy(layoutOpts.spawn);
+  }
+
+  setEffectsCamera(camera: THREE.Camera | null) {
+    this.effects.setCamera(camera);
+  }
+
+  applyQuality(settings: QualitySettings) {
+    this.effects.applyQuality(settings);
   }
 
   onEvent(listener: StrikeEventListener) {
@@ -328,6 +337,7 @@ export class StrikeMission {
             message: `COMBO x${this.scoring.getMultiplier()}`,
           });
         }
+
       } else {
         this.emit({ type: 'hit', enemy: hit.enemy });
       }
