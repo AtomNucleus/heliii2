@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#061018" />
+    <meta name="description" content="HELI SUNSET — neon arcade helicopter strike run over Fruzer Polygon." />
+    <title>HELI SUNSET — Strike Run</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#start-btn">Skip to start</a>
+
+    <div id="app">
+      <canvas id="game-canvas" aria-label="Helicopter game view" tabindex="-1"></canvas>
+
+      <div id="damage-flash" class="damage-flash" aria-hidden="true"></div>
+
+      <div id="crosshair" class="crosshair hidden" data-state="idle" aria-hidden="true">
+        <span class="crosshair-ring"></span>
+        <span class="crosshair-dot"></span>
+        <span class="crosshair-arm crosshair-arm-n"></span>
+        <span class="crosshair-arm crosshair-arm-s"></span>
+        <span class="crosshair-arm crosshair-arm-e"></span>
+        <span class="crosshair-arm crosshair-arm-w"></span>
+      </div>
+
+      <div id="hud" class="hud hidden" role="status" aria-live="polite">
+        <div class="hud-brand" aria-hidden="true">
+          <span class="hud-brand-mark">HS</span>
+          <span class="hud-brand-name">HELI SUNSET</span>
+        </div>
+
+        <div class="hud-cluster-left">
+          <div id="hud-health" class="hud-health is-combat-only is-hidden" data-level="ok">
+            <div class="hud-health-header">
+              <span class="hud-label">HULL</span>
+              <span id="hud-health-text" class="hud-health-text">100</span>
+            </div>
+            <div class="hud-health-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-label="Hull integrity">
+              <div id="hud-health-fill" class="hud-health-fill"></div>
+            </div>
+          </div>
+
+          <div class="hud-meter">
+            <div class="hud-row">
+              <span class="hud-label">TIME</span>
+              <span id="hud-time" class="hud-value">0:00.0</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-label">SPEED</span>
+              <span id="hud-speed" class="hud-value">0</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-label">ALT</span>
+              <span id="hud-altitude" class="hud-value">0</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-label">RINGS</span>
+              <span id="hud-rings" class="hud-value">0/10</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-cluster-right">
+          <div class="hud-score-block is-combat-only is-hidden">
+            <span class="hud-label">SCORE</span>
+            <span id="hud-score" class="hud-score">0</span>
+          </div>
+          <div id="hud-combo" class="hud-combo is-combat-only is-hidden" aria-live="polite">
+            <span class="hud-combo-label">COMBO</span>
+            <span id="hud-combo-value" class="hud-combo-value">x1</span>
+          </div>
+          <div id="hud-weapon" class="hud-weapon is-combat-only is-hidden" data-ready="true">
+            <span class="hud-weapon-pip" aria-hidden="true"></span>
+            <span id="hud-weapon-label" class="hud-weapon-label">ROCKETS READY</span>
+          </div>
+          <button
+            id="mute-btn"
+            class="hud-mute"
+            type="button"
+            aria-pressed="false"
+            aria-label="Mute audio"
+            title="Mute (M)"
+          >
+            AUD
+          </button>
+        </div>
+
+        <div id="hud-toast" class="hud-toast" aria-live="polite"></div>
+        <div id="hud-score-popup" class="hud-score-popup" aria-hidden="true"></div>
+
+        <div id="hud-mission" class="hud-mission is-combat-only is-hidden">
+          <span class="hud-mission-tag">OP · STRIKE RUN</span>
+          <span id="hud-mission-title" class="hud-mission-title">DESTROY SUPPLY DEPOTS</span>
+          <span id="hud-mission-detail" class="hud-mission-detail">Primary targets remaining</span>
+          <div class="hud-mission-progress">
+            <div class="hud-mission-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Mission progress">
+              <div id="hud-mission-fill" class="hud-mission-fill"></div>
+            </div>
+            <span id="hud-mission-count" class="hud-mission-count">0/0</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="start-overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="start-title">
+        <div class="overlay-atmosphere" aria-hidden="true"></div>
+        <div class="overlay-panel">
+          <p class="brand-eyebrow">ARCADE FLIGHT</p>
+          <h1 class="title brand-title" id="start-title">
+            <span class="title-heli">HELI</span>
+            <span class="title-sunset">SUNSET</span>
+          </h1>
+          <p class="subtitle">Operation SUNSET · Fruzer Polygon</p>
+          <p id="loading-status" class="loading-status" aria-live="polite">Loading Fruzer Polygon map…</p>
+
+          <div class="mission-brief">
+            <div class="mission-brief-header">
+              <span class="mission-brief-code">OP · SUNSET</span>
+              <span class="mission-brief-name">CINEMATIC STRIKE</span>
+            </div>
+            <p class="mission-brief-copy">
+              Eight-phase, three-act strike across Fruzer Polygon (~8–10 min). Act I infiltration,
+              Act II escalation (gauntlet · convoy · drones), Act III bunker climax and exfil.
+              Rings heal and feed combo. Checkpoints recover hull — chase grade S on replay.
+            </p>
+          </div>
+
+          <ul class="controls">
+            <li>
+              <span class="control-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span>
+              <span class="control-desc">steer &amp; move</span>
+            </li>
+            <li>
+              <span class="control-keys"><kbd>Space</kbd><kbd>Shift</kbd></span>
+              <span class="control-desc">ascend / descend</span>
+            </li>
+            <li>
+              <span class="control-keys"><kbd>F</kbd><span class="control-chip">CLICK</span></span>
+              <span class="control-desc">fire rockets</span>
+            </li>
+            <li>
+              <span class="control-keys"><kbd>E</kbd><kbd>Q</kbd></span>
+              <span class="control-desc">boost / evasive</span>
+            </li>
+            <li>
+              <span class="control-keys"><span class="control-chip">TOUCH</span></span>
+              <span class="control-desc">steer pad · ASC/DESC · FIRE · BOOST</span>
+            </li>
+            <li>
+              <span class="control-keys"><kbd>R</kbd><kbd>M</kbd></span>
+              <span class="control-desc">restart / mute</span>
+            </li>
+          </ul>
+
+          <button id="start-btn" class="neon-btn" disabled>LOADING…</button>
+          <p class="hint">or press Enter / tap start</p>
+          <p class="credit">
+            Map:
+            <a
+              href="https://sketchfab.com/3d-models/chicken-gun-fruzer-polygon-f6bd85b8748a43fc95ee321f0e4a8677"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Chicken Gun Fruzer — Polygon</a
+            >
+            by
+            <a href="https://sketchfab.com/amogusstrikesback2" target="_blank" rel="noopener noreferrer"
+              >amogusstrikesback2</a
+            >
+            · CC Attribution
+          </p>
+        </div>
+      </div>
+
+      <div id="complete-overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="end-title">
+        <div class="overlay-atmosphere overlay-atmosphere-win" aria-hidden="true"></div>
+        <div id="end-panel" class="overlay-panel">
+          <h1 class="title" id="end-title">MISSION COMPLETE</h1>
+          <p class="subtitle" id="end-subtitle">Strike successful</p>
+          <p id="final-score" class="final-time">0</p>
+          <div class="complete-stats">
+            <div class="stat">
+              <span class="stat-label">TIME</span>
+              <span id="final-time" class="stat-value">0:00.0</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">KILLS</span>
+              <span id="final-kills" class="stat-value">0</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">COMBO</span>
+              <span id="final-combo" class="stat-value">0</span>
+            </div>
+          </div>
+          <button id="restart-btn" class="neon-btn">FLY AGAIN</button>
+          <p class="hint">or press R</p>
+        </div>
+      </div>
+
+      <div id="mobile-controls" class="mobile-controls hidden" aria-hidden="true">
+        <button id="mobile-restart" class="mobile-restart" type="button" aria-label="Restart flight">
+          RST
+        </button>
+
+        <button id="mobile-fire" class="mobile-fire" type="button" aria-label="Fire rockets">
+          FIRE
+        </button>
+
+        <div class="mobile-steer-zone" aria-label="Steer and move">
+          <div id="mobile-stick" class="mobile-stick" role="application" aria-label="Move joystick">
+            <span class="mobile-stick-label mobile-stick-label-top">FWD</span>
+            <span class="mobile-stick-label mobile-stick-label-bottom">BACK</span>
+            <span class="mobile-stick-label mobile-stick-label-left">LEFT</span>
+            <span class="mobile-stick-label mobile-stick-label-right">RIGHT</span>
+            <div id="mobile-stick-knob" class="mobile-stick-knob"></div>
+          </div>
+        </div>
+
+        <div class="mobile-altitude-zone" aria-label="Altitude and boost">
+          <button class="mobile-altitude-button" type="button" data-mobile-input="up" aria-label="Ascend">
+            ASC
+          </button>
+          <button
+            class="mobile-altitude-button mobile-altitude-button-boost"
+            type="button"
+            data-mobile-input="boost"
+            aria-label="Boost"
+          >
+            BST
+          </button>
+          <button
+            class="mobile-altitude-button mobile-altitude-button-descend"
+            type="button"
+            data-mobile-input="down"
+            aria-label="Descend"
+          >
+            DESC
+          </button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

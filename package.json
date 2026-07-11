@@ -1,0 +1,23 @@
+{
+  "name": "heli-sunset",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "tsx --test src/combat/ai/ai.test.ts",
+    "test:ai": "tsx --test src/combat/ai/ai.test.ts",
+    "test:collision": "node scripts/verify-collision.mjs"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "tsx": "^4.23.0",
+    "typescript": "~5.6.3",
+    "vite": "^6.0.3"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  }
+}
