@@ -3,14 +3,12 @@ import type { QualitySettings } from '../effects/quality';
 import type { GameRendererHandle, RendererInitInfo } from '../render/types';
 import { isWebGPUActive } from '../render/runtime';
 import { COLORS } from './setupColors';
-import {
-  createWebGPUSunsetSkyMaterial,
-  createWebGPUSunFlareMaterial,
-  type SkyUniformHandles,
-  type FlareUniformHandles,
-} from './skyMaterials';
 
 export { COLORS } from './setupColors';
+
+/** Lazily loaded WebGPU/TSL sky module — never pulled on the mobile WebGL path. */
+type WebGPUSkyModule = typeof import('./skyMaterials');
+let webgpuSkyModule: WebGPUSkyModule | null = null;
 
 export interface AtmosphereState {
   /** 0..1 — denser haze near horizon / low altitude */
@@ -23,12 +21,12 @@ export interface AtmosphereState {
 
 type SkyHandles = {
   kind: 'webgl' | 'webgpu';
-  uniforms: SkyUniformHandles | THREE.ShaderMaterial['uniforms'];
+  uniforms: any;
 };
 
 type FlareHandles = {
   kind: 'webgl' | 'webgpu';
-  uniforms: FlareUniformHandles | THREE.ShaderMaterial['uniforms'];
+  uniforms: any;
 };
 
 /**
@@ -36,9 +34,9 @@ type FlareHandles = {
  * Uses ShaderMaterial on WebGL and TSL NodeMaterial on WebGPU.
  */
 export function createSunsetSkyDome(radius = 520): THREE.Mesh {
-  if (isWebGPUActive()) {
-    const { material, uniforms } = createWebGPUSunsetSkyMaterial();
-    const sky = new THREE.Mesh(new THREE.SphereGeometry(radius, 48, 24), material);
+  if (isWebGPUActive() && webgpuSkyModule) {
+    const { material, uniforms } = webgpuSkyModule.createWebGPUSunsetSkyMaterial();
+    const sky = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 16), material);
     sky.name = 'sunset-sky';
     sky.frustumCulled = false;
     sky.renderOrder = -1000;
@@ -46,7 +44,7 @@ export function createSunsetSkyDome(radius = 520): THREE.Mesh {
     return sky;
   }
 
-  const geo = new THREE.SphereGeometry(radius, 48, 24);
+  const geo = new THREE.SphereGeometry(radius, 32, 16);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
@@ -154,8 +152,8 @@ export function createSunDisc(): THREE.Group {
 
   const flareGeo = new THREE.PlaneGeometry(70, 70);
   let flare: THREE.Mesh;
-  if (isWebGPUActive()) {
-    const { material, uniforms } = createWebGPUSunFlareMaterial();
+  if (isWebGPUActive() && webgpuSkyModule) {
+    const { material, uniforms } = webgpuSkyModule.createWebGPUSunFlareMaterial();
     flare = new THREE.Mesh(flareGeo, material);
     flare.userData.flareHandles = { kind: 'webgpu', uniforms } satisfies FlareHandles;
   } else {
@@ -206,6 +204,12 @@ export function createSunDisc(): THREE.Group {
 export async function createSceneSetup(canvas: HTMLCanvasElement) {
   const { createGameRenderer } = await import('../render/createRenderer');
   const gameRenderer = await createGameRenderer({ canvas });
+  // Prime WebGPU sky/TSL only when that backend actually won — keeps phones on WebGL lean.
+  if (gameRenderer.isWebGPURenderer) {
+    webgpuSkyModule = await import('./skyMaterials');
+  } else {
+    webgpuSkyModule = null;
+  }
   return createSceneSetupWithRenderer(canvas, gameRenderer);
 }
 
@@ -232,7 +236,7 @@ export function createSceneSetupWithRenderer(
   const sunLight = new THREE.DirectionalLight(COLORS.orangeGlow, 1.95);
   sunLight.position.set(80, 45, -60);
   sunLight.castShadow = true;
-  sunLight.shadow.mapSize.set(2048, 2048);
+  sunLight.shadow.mapSize.set(1024, 1024);
   sunLight.shadow.camera.near = 10;
   sunLight.shadow.camera.far = 380;
   sunLight.shadow.camera.left = -140;
@@ -311,10 +315,8 @@ export function createSceneSetupWithRenderer(
     if (skyMesh) {
       const handles = skyMesh.userData.skyHandles as SkyHandles | undefined;
       if (handles?.uniforms) {
-        const hazeU = (handles.uniforms as SkyUniformHandles).haze
-          ?? (handles.uniforms as THREE.ShaderMaterial['uniforms']).haze;
-        const timeU = (handles.uniforms as SkyUniformHandles).time
-          ?? (handles.uniforms as THREE.ShaderMaterial['uniforms']).time;
+        const hazeU = handles.uniforms.haze;
+        const timeU = handles.uniforms.time;
         if (hazeU) hazeU.value = atmosphere.haze;
         if (timeU) timeU.value = (timeU.value as number) + dt;
       }
@@ -325,9 +327,7 @@ export function createSceneSetupWithRenderer(
       if (flare) {
         flare.quaternion.copy(camera.quaternion);
         const handles = flare.userData.flareHandles as FlareHandles | undefined;
-        const intensity =
-          (handles?.uniforms as FlareUniformHandles | undefined)?.intensity
-          ?? (handles?.uniforms as THREE.ShaderMaterial['uniforms'] | undefined)?.intensity;
+        const intensity = handles?.uniforms?.intensity;
         if (intensity) {
           intensity.value =
             0.28 + atmosphere.haze * 0.22 + Math.sin(atmosphere.sunPulse) * 0.03;

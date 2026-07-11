@@ -51,14 +51,20 @@ export class VisualEffects {
   private readonly sunDir = new THREE.Vector3(0.55, 0.28, -0.45).normalize();
   private reducedMotion = false;
 
-  constructor(sceneSetup: SceneSetup) {
-    this.sceneSetup = sceneSetup;
-    this.quality = new AdaptiveQuality();
-    this.post = createPostProcessing(
+  /** Async factory so WebGPU post stays off the mobile WebGL parse path. */
+  static async create(sceneSetup: SceneSetup): Promise<VisualEffects> {
+    const post = await createPostProcessing(
       sceneSetup.renderer,
       sceneSetup.scene,
       sceneSetup.camera,
     );
+    return new VisualEffects(sceneSetup, post);
+  }
+
+  private constructor(sceneSetup: SceneSetup, post: PostProcessingHandle) {
+    this.sceneSetup = sceneSetup;
+    this.quality = new AdaptiveQuality();
+    this.post = post;
     this.exhaust = new ExhaustParticles(sceneSetup.scene);
     this.trail = new MotionTrail(sceneSetup.scene);
     this.speedFx = new SpeedEffects(sceneSetup.scene);

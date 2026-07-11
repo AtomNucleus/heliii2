@@ -35,7 +35,10 @@ describe('debrisPhysicsBudgetFromTier', () => {
     const high = debrisPhysicsBudgetFromTier('high');
     assert.ok(low.maxBodies < high.maxBodies);
     assert.ok(low.maxPerBurst < high.maxPerBurst);
-    assert.equal(estimateDebrisPhysicsPeak(low), low.maxBodies);
+    assert.equal(low.enabled, false);
+    assert.equal(high.enabled, true);
+    assert.equal(estimateDebrisPhysicsPeak(low), 0);
+    assert.equal(estimateDebrisPhysicsPeak(high), high.maxBodies);
   });
 });
 

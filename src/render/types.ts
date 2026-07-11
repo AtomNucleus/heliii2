@@ -1,9 +1,26 @@
 import type * as THREE from 'three';
-import type { WebGPURenderer } from 'three/webgpu';
 import type { RendererBackend, RendererPreference } from './preference';
 
-/** Union of supported game renderers (classic WebGL or WebGPU). */
-export type GameRendererInstance = THREE.WebGLRenderer | WebGPURenderer;
+/**
+ * Minimal renderer surface shared by classic WebGL and WebGPU backends.
+ * Avoids a hard type import from `three/webgpu` on the shared boot path.
+ */
+export interface GameRendererInstance {
+  domElement: HTMLCanvasElement;
+  toneMapping: number;
+  toneMappingExposure: number;
+  outputColorSpace: string;
+  shadowMap: {
+    enabled: boolean;
+    type: number;
+    autoUpdate?: boolean;
+  };
+  setPixelRatio: (n: number) => void;
+  setSize: (w: number, h: number, updateStyle?: boolean) => void;
+  setAnimationLoop: (cb: ((time: number, frame?: unknown) => void) | null) => void;
+  render?: (scene: THREE.Object3D, camera: THREE.Camera) => void;
+  dispose: () => void;
+}
 
 export interface RendererInitInfo {
   /** Effective graphics API used for drawing. */

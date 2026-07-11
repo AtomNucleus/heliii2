@@ -21,7 +21,8 @@ import {
   clearWebGLRecovery,
   stripRecoveryQueryParams,
 } from './render';
-import { ensureSharedDebrisPhysics, getSharedDebrisPhysics, setSharedDebrisPhysics } from './physics';
+import { ensureSharedDebrisPhysics, getSharedDebrisPhysics, setSharedDebrisPhysics, DebrisPhysicsWorld } from './physics';
+import { shouldEnableRapierDebris } from './effects/quality';
 import { initPwa, type PwaController } from './pwa';
 import {
   initProfileSession,
@@ -563,13 +564,14 @@ async function boot() {
       world.environment?.getFoamMeshes?.() ?? [],
     );
 
-    // Visual-only Rapier debris — never blocks boot if WASM init fails.
+    // Visual-only debris. Skip Rapier WASM on phones / low RAM (~2MB+ heap).
     setLoadingText('Initializing physics…');
     try {
-      const debrisPhysics = await ensureSharedDebrisPhysics(
-        { groundY: 0 },
-        fx.quality.currentTier,
-      );
+      const tier = fx.quality.currentTier;
+      const useRapier = shouldEnableRapierDebris(tier) && fx.quality.current.physicsDebris;
+      const debrisPhysics = useRapier
+        ? await ensureSharedDebrisPhysics({ groundY: 0 }, tier)
+        : DebrisPhysicsWorld.createKinematic({ groundY: 0 }, tier);
       setSharedDebrisPhysics(debrisPhysics);
       console.info(
         `[physics] debris=${debrisPhysics.usingRapier ? 'rapier' : 'kinematic-fallback'}`
@@ -875,7 +877,7 @@ async function main() {
     sunLight = sceneSetup.sunLight;
 
     try {
-      fx = new VisualEffects(sceneSetup);
+      fx = await VisualEffects.create(sceneSetup);
     } catch (fxErr) {
       if (
         sceneSetup.rendererInfo.backend === 'webgpu'

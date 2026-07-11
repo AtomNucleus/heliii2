@@ -116,7 +116,10 @@ export function getEnvBudget(tier: EnvQualityTier | string | undefined): EnvBudg
 export function detectEnvTier(): EnvQualityTier {
   const cores = navigator.hardwareConcurrency ?? 4;
   const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
-  if (cores <= 2 || mem <= 2) return 'low';
-  if (cores <= 4 || mem <= 4) return 'medium';
+  const touch = (navigator.maxTouchPoints ?? 0) > 0;
+  const coarse =
+    typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  if (touch || coarse || cores <= 4 || mem <= 4) return 'low';
+  if (cores <= 6 || mem <= 6) return 'medium';
   return 'high';
 }

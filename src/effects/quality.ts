@@ -1,7 +1,12 @@
 /**
- * Adaptive quality tiers for browser performance.
+ * Adaptive quality tiers for browser performance / memory.
  * Samples frame time and steps settings up/down without thrashing.
  */
+
+import {
+  isMobileLikeEnvironment,
+  readDeviceCapabilitySignals,
+} from '../render/deviceCapability';
 
 export type QualityTier = 'low' | 'medium' | 'high';
 
@@ -30,7 +35,10 @@ export interface QualitySettings {
   contactShadow: boolean;
   /** MeshStandard water response / wake cues. */
   waterResponse: boolean;
-  /** Rapier visual debris (falls back to kinematic if init fails). */
+  /**
+   * Rapier visual debris. Off on low / constrained devices — kinematic
+   * debris still runs without the ~2MB WASM heap.
+   */
   physicsDebris: boolean;
 }
 
@@ -41,68 +49,68 @@ const TIERS: Record<QualityTier, QualitySettings> = {
     shadowMapSize: 512,
     shadowsEnabled: false,
     bloomEnabled: true,
-    bloomStrength: 0.12,
+    bloomStrength: 0.1,
     filmGrain: false,
     vignette: true,
     chromaticAberration: false,
     colorGrade: true,
-    particleScale: 0.45,
-    trailSegments: 16,
-    speedLineCount: 10,
-    atmosphereCount: 36,
-    cloudCount: 4,
-    windStreakCount: 8,
-    composerScale: 0.75,
+    particleScale: 0.35,
+    trailSegments: 12,
+    speedLineCount: 6,
+    atmosphereCount: 20,
+    cloudCount: 3,
+    windStreakCount: 5,
+    composerScale: 0.65,
     lightShafts: false,
     lightShaftCount: 0,
     contactShadow: true,
-    waterResponse: true,
-    physicsDebris: true,
+    waterResponse: false,
+    physicsDebris: false,
   },
   medium: {
     tier: 'medium',
+    pixelRatioCap: 1.25,
+    shadowMapSize: 1024,
+    shadowsEnabled: true,
+    bloomEnabled: true,
+    bloomStrength: 0.15,
+    filmGrain: false,
+    vignette: true,
+    chromaticAberration: false,
+    colorGrade: true,
+    particleScale: 0.6,
+    trailSegments: 22,
+    speedLineCount: 14,
+    atmosphereCount: 48,
+    cloudCount: 5,
+    windStreakCount: 10,
+    composerScale: 0.8,
+    lightShafts: true,
+    lightShaftCount: 2,
+    contactShadow: true,
+    waterResponse: true,
+    physicsDebris: false,
+  },
+  high: {
+    tier: 'high',
     pixelRatioCap: 1.5,
     shadowMapSize: 1024,
     shadowsEnabled: true,
     bloomEnabled: true,
-    bloomStrength: 0.17,
-    filmGrain: false,
-    vignette: true,
-    chromaticAberration: true,
-    colorGrade: true,
-    particleScale: 0.75,
-    trailSegments: 28,
-    speedLineCount: 22,
-    atmosphereCount: 72,
-    cloudCount: 7,
-    windStreakCount: 14,
-    composerScale: 0.9,
-    lightShafts: true,
-    lightShaftCount: 3,
-    contactShadow: true,
-    waterResponse: true,
-    physicsDebris: true,
-  },
-  high: {
-    tier: 'high',
-    pixelRatioCap: 2,
-    shadowMapSize: 2048,
-    shadowsEnabled: true,
-    bloomEnabled: true,
-    bloomStrength: 0.22,
+    bloomStrength: 0.2,
     filmGrain: true,
     vignette: true,
     chromaticAberration: true,
     colorGrade: true,
-    particleScale: 1,
-    trailSegments: 40,
-    speedLineCount: 34,
-    atmosphereCount: 110,
-    cloudCount: 10,
-    windStreakCount: 22,
-    composerScale: 1,
+    particleScale: 0.85,
+    trailSegments: 32,
+    speedLineCount: 24,
+    atmosphereCount: 80,
+    cloudCount: 8,
+    windStreakCount: 16,
+    composerScale: 0.95,
     lightShafts: true,
-    lightShaftCount: 5,
+    lightShaftCount: 4,
     contactShadow: true,
     waterResponse: true,
     physicsDebris: true,
@@ -111,13 +119,29 @@ const TIERS: Record<QualityTier, QualitySettings> = {
 
 const TIER_ORDER: QualityTier[] = ['low', 'medium', 'high'];
 
+function readDeviceMemoryGb(): number {
+  return (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
+}
+
 function detectInitialTier(): QualityTier {
   const cores = navigator.hardwareConcurrency ?? 4;
-  const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
+  const mem = readDeviceMemoryGb();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  if (cores <= 2 || mem <= 2 || dpr >= 2.5) return 'low';
-  if (cores <= 4 || mem <= 4) return 'medium';
+  const mobile = isMobileLikeEnvironment(readDeviceCapabilitySignals());
+
+  // Phones / low-RAM browsers start on the lean tier.
+  if (mobile || cores <= 4 || mem <= 4 || dpr >= 2.5) return 'low';
+  if (cores <= 6 || mem <= 6) return 'medium';
   return 'high';
+}
+
+/** Whether to download/init Rapier WASM (~2MB + heap). */
+export function shouldEnableRapierDebris(tier: QualityTier = detectInitialTier()): boolean {
+  if (!getQualitySettings(tier).physicsDebris) return false;
+  const mem = readDeviceMemoryGb();
+  if (mem > 0 && mem <= 4) return false;
+  if (isMobileLikeEnvironment(readDeviceCapabilitySignals())) return false;
+  return true;
 }
 
 export function getQualitySettings(tier: QualityTier): QualitySettings {
@@ -130,8 +154,7 @@ export class AdaptiveQuality {
   private frameMsEma = 16.7;
   private settleTimer = 0;
   private readonly listeners = new Set<(s: QualitySettings) => void>();
-  /** When set, adaptive stepping is disabled and tier stays locked. */
-  private locked: QualityTier | null = null;
+  private preference: QualityTier | 'auto' = 'auto';
 
   /** Target ~55fps before stepping down; ~58fps before stepping up */
   private readonly downMs = 22;
@@ -164,22 +187,17 @@ export class AdaptiveQuality {
     for (const fn of this.listeners) fn(this.settings);
   }
 
-  /**
-   * Lock to a fixed tier, or pass null for auto adaptive.
-   * Does not interrupt mid-frame; applies on next setTier/update.
-   */
+  /** Lock adaptive stepping to a preference, or re-enable auto. */
   setPreference(pref: QualityTier | 'auto') {
-    if (pref === 'auto') {
-      this.locked = null;
-      return;
+    this.preference = pref;
+    if (pref !== 'auto') {
+      this.setTier(pref);
     }
-    this.locked = pref;
-    this.setTier(pref);
   }
 
   /** Call once per frame with clamped dt (seconds). */
   update(dt: number) {
-    if (this.locked) return;
+    if (this.preference !== 'auto') return;
     const ms = Math.min(dt * 1000, 50);
     this.frameMsEma = this.frameMsEma * 0.92 + ms * 0.08;
     this.settleTimer = Math.max(0, this.settleTimer - dt);
@@ -189,7 +207,12 @@ export class AdaptiveQuality {
     if (this.frameMsEma > this.downMs && idx > 0) {
       this.setTier(TIER_ORDER[idx - 1]!);
     } else if (this.frameMsEma < this.upMs && idx < TIER_ORDER.length - 1) {
-      this.setTier(TIER_ORDER[idx + 1]!);
+      // Never auto-promote phones into Rapier/high VRAM tiers.
+      const next = TIER_ORDER[idx + 1]!;
+      if (isMobileLikeEnvironment(readDeviceCapabilitySignals()) && next === 'high') {
+        return;
+      }
+      this.setTier(next);
     }
   }
 }

@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-/** Precache budget: Fruzer map GLB (~2.9MB) + heli + Draco + shell. */
-const PRECACHE_MAX_BYTES = 5 * 1024 * 1024;
+/** Shell precache only — large GLB/WASM use runtime CacheFirst to limit RAM pressure. */
+const PRECACHE_MAX_BYTES = 2 * 1024 * 1024;
 
 export default defineConfig({
   base: './',
@@ -16,6 +16,13 @@ export default defineConfig({
     cssCodeSplit: true,
     modulePreload: {
       polyfill: true,
+      resolveDependencies(filename, deps) {
+        // Avoid eager preload of optional heavy backends on every visit.
+        return deps.filter(
+          (dep) =>
+            !dep.includes('three-webgpu') && !dep.includes('rapier') && !dep.endsWith('.map'),
+        );
+      },
     },
     rollupOptions: {
       output: {
@@ -29,7 +36,9 @@ export default defineConfig({
           if (
             id.includes('three.webgpu') ||
             id.includes('/three/webgpu') ||
-            id.includes('three.tsl')
+            id.includes('three.tsl') ||
+            id.includes('/src/scene/skyMaterials') ||
+            id.includes('/src/effects/postprocessingWebgpu')
           ) {
             return 'three-webgpu';
           }
@@ -43,13 +52,10 @@ export default defineConfig({
   },
   plugins: [
     VitePWA({
-      // Player confirms reload; never auto-skipWaiting mid-mission.
       registerType: 'prompt',
-      // Dev must not install a SW (avoids stale-cache surprises with HMR).
       devOptions: {
         enabled: false,
       },
-      // Public icons are copied by Vite and picked up via workbox.globPatterns.
       includeAssets: [],
       manifest: {
         name: 'HELI SUNSET',
@@ -60,7 +66,6 @@ export default defineConfig({
         background_color: '#061018',
         display: 'standalone',
         orientation: 'landscape',
-        // Relative paths keep install/scope correct with Vite base: './' and Netlify.
         scope: './',
         start_url: './',
         lang: 'en',
@@ -93,9 +98,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Shell + hashed assets + large local map/model/Draco payloads.
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,glb,wasm,webmanifest}'],
-        // Avoid double-precache: vite-plugin-pwa also injects manifest icons + webmanifest.
+        // Precache the app shell only. Optional backends + GLB stay runtime-cached.
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
         globIgnores: [
           '**/ATTRIBUTION.md',
           '**/manifest.webmanifest',
@@ -103,12 +107,53 @@ export default defineConfig({
           '**/icons/icon-512.png',
           '**/icons/maskable-192.png',
           '**/icons/maskable-512.png',
+          '**/rapier-*.js',
+          '**/three-webgpu-*.js',
+          '**/*.map',
+          '**/draco_decoder-*.js',
+          '**/draco_decoder-*.wasm',
+          '**/draco_wasm_wrapper-*.js',
         ],
         maximumFileSizeToCacheInBytes: PRECACHE_MAX_BYTES,
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) =>
+              /\.(?:glb|wasm)$/i.test(url.pathname) ||
+              /\/draco\//i.test(url.pathname) ||
+              /\/maps\//i.test(url.pathname) ||
+              /\/models\//i.test(url.pathname),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'heli-heavy-assets',
+              expiration: {
+                maxEntries: 12,
+                maxAgeSeconds: 60 * 60 * 24 * 30,
+              },
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
+            },
+          },
+          {
+            urlPattern: ({ url }) =>
+              /rapier-/i.test(url.pathname) || /three-webgpu-/i.test(url.pathname),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'heli-optional-backends',
+              expiration: {
+                maxEntries: 4,
+                maxAgeSeconds: 60 * 60 * 24 * 30,
+              },
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
+            },
+          },
+        ],
       },
     }),
   ],

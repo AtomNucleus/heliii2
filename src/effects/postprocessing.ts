@@ -1,26 +1,25 @@
 import * as THREE from 'three';
-import type { WebGPURenderer } from 'three/webgpu';
 import type { GameRendererInstance } from '../render/types';
 import { getActiveRendererBackend } from '../render/runtime';
-import { createWebGLPostProcessing } from './postprocessingWebgl';
-import { createWebGPUPostProcessing } from './postprocessingWebgpu';
 import type { PostProcessingHandle } from './postprocessingTypes';
 
 export type { PostProcessingHandle } from './postprocessingTypes';
 
 /**
- * Backend-specific post-processing factory.
- * WebGL → classic EffectComposer / GLSL passes.
- * WebGPU → TSL RenderPipeline (bloom, grade, vignette, RGB shift, film).
+ * Backend-specific post-processing factory (async so WebGPU/TSL stays off the
+ * classic WebGL download+parse path used on phones).
  */
-export function createPostProcessing(
+export async function createPostProcessing(
   renderer: GameRendererInstance,
   scene: THREE.Scene,
   camera: THREE.Camera,
-): PostProcessingHandle {
+): Promise<PostProcessingHandle> {
   const backend = getActiveRendererBackend();
   if (backend === 'webgpu') {
-    return createWebGPUPostProcessing(renderer as WebGPURenderer, scene, camera);
+    const { createWebGPUPostProcessing } = await import('./postprocessingWebgpu');
+    // WebGPURenderer is only constructed on this path.
+    return createWebGPUPostProcessing(renderer as never, scene, camera);
   }
+  const { createWebGLPostProcessing } = await import('./postprocessingWebgl');
   return createWebGLPostProcessing(renderer as THREE.WebGLRenderer, scene, camera);
 }
