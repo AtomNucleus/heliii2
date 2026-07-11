@@ -162,6 +162,7 @@ function animate() {
     boosting: controller.isBoosting(),
     health: missionHud?.health ?? controller.getHealth(),
     healthMax: missionHud?.healthMax ?? 100,
+    cameraPosition: camera.position,
   });
 
   fx.update({

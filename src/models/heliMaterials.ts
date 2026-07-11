@@ -33,7 +33,8 @@ function canvasNoise(size = 64, tint = '#2a6b55'): THREE.CanvasTexture {
     img.data[i + 2] = Math.min(255, img.data[i + 2] + n - 16);
   }
   ctx.putImageData(img, 0, 0);
-  ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+  // Panel lines
+  ctx.strokeStyle = 'rgba(0,0,0,0.28)';
   ctx.lineWidth = 1;
   for (let y = 8; y < size; y += 16) {
     ctx.beginPath();
@@ -47,10 +48,18 @@ function canvasNoise(size = 64, tint = '#2a6b55'): THREE.CanvasTexture {
     ctx.lineTo(x, size);
     ctx.stroke();
   }
+  // Rivet dots
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  for (let y = 4; y < size; y += 16) {
+    for (let x = 4; x < size; x += 20) {
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(2.5, 2.5);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
   tex.needsUpdate = true;
   return tex;
 }
@@ -73,78 +82,126 @@ function roughnessMap(size = 64): THREE.CanvasTexture {
   return tex;
 }
 
+/** Cheap procedural normal from luminance noise (tangent-ish). */
+function normalMap(size = 64): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d')!;
+  const img = ctx.createImageData(size, size);
+  const h = new Float32Array(size * size);
+  for (let i = 0; i < h.length; i++) h[i] = Math.random();
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = y * size + x;
+      const xr = h[y * size + ((x + 1) % size)];
+      const xl = h[y * size + ((x - 1 + size) % size)];
+      const yu = h[((y + 1) % size) * size + x];
+      const yd = h[((y - 1 + size) % size) * size + x];
+      const dx = (xl - xr) * 2;
+      const dy = (yd - yu) * 2;
+      const dz = 1;
+      const len = Math.hypot(dx, dy, dz) || 1;
+      const o = i * 4;
+      img.data[o] = ((dx / len) * 0.5 + 0.5) * 255;
+      img.data[o + 1] = ((dy / len) * 0.5 + 0.5) * 255;
+      img.data[o + 2] = ((dz / len) * 0.5 + 0.5) * 255;
+      img.data[o + 3] = 255;
+    }
+  }
+  // Carve panel grooves into normal
+  for (let y = 8; y < size; y += 16) {
+    for (let x = 0; x < size; x++) {
+      const o = (y * size + x) * 4;
+      img.data[o + 1] = Math.max(0, img.data[o + 1] - 40);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2.5, 2.5);
+  tex.needsUpdate = true;
+  return tex;
+}
+
 /**
- * Build procedural PBR materials (no external assets).
- * Canvas maps add panel / wear variation on top of any GLB albedo.
+ * Build procedural PBR materials (no external assets / runtime services).
  */
 export function createHeliMaterialKit(): HeliMaterialKit {
   const albedo = canvasNoise(96, '#2f8f6c');
   const rough = roughnessMap(64);
+  const normal = normalMap(64);
 
   const body = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     map: albedo,
     roughnessMap: rough,
-    roughness: 0.42,
-    metalness: 0.38,
-    envMapIntensity: 1.15,
+    normalMap: normal,
+    normalScale: new THREE.Vector2(0.45, 0.45),
+    roughness: 0.4,
+    metalness: 0.4,
+    envMapIntensity: 1.2,
   });
 
   const rotor = new THREE.MeshStandardMaterial({
-    color: 0x1c2428,
-    roughness: 0.55,
-    metalness: 0.62,
-    envMapIntensity: 0.9,
+    color: 0x1a2226,
+    roughness: 0.5,
+    metalness: 0.68,
+    envMapIntensity: 0.95,
+    normalMap: normal,
+    normalScale: new THREE.Vector2(0.25, 0.25),
   });
 
   const weapon = new THREE.MeshStandardMaterial({
     color: 0x3a4548,
-    roughness: 0.35,
-    metalness: 0.72,
-    envMapIntensity: 1.2,
+    roughness: 0.32,
+    metalness: 0.78,
+    envMapIntensity: 1.25,
   });
 
   const canopy = new THREE.MeshPhysicalMaterial({
-    color: 0x6ec8e8,
-    roughness: 0.08,
-    metalness: 0.15,
-    transmission: 0.55,
-    thickness: 0.35,
+    color: 0x5eb8d8,
+    roughness: 0.06,
+    metalness: 0.12,
+    transmission: 0.62,
+    thickness: 0.4,
     transparent: true,
-    opacity: 0.72,
-    envMapIntensity: 1.4,
+    opacity: 0.68,
+    envMapIntensity: 1.55,
     side: THREE.DoubleSide,
     depthWrite: false,
+    clearcoat: 1,
+    clearcoatRoughness: 0.08,
   });
 
   const interior = new THREE.MeshStandardMaterial({
     color: 0x12181c,
-    roughness: 0.7,
-    metalness: 0.2,
+    roughness: 0.72,
+    metalness: 0.18,
     emissive: new THREE.Color(0x1a4038),
     emissiveIntensity: 0.45,
   });
 
   const metalDark = new THREE.MeshStandardMaterial({
     color: 0x1a2226,
-    roughness: 0.48,
-    metalness: 0.7,
+    roughness: 0.46,
+    metalness: 0.72,
+    envMapIntensity: 1.05,
   });
 
   const accent = new THREE.MeshStandardMaterial({
     color: COLORS.orangeSun,
-    roughness: 0.4,
-    metalness: 0.35,
+    roughness: 0.38,
+    metalness: 0.38,
     emissive: COLORS.orangeHot,
-    emissiveIntensity: 0.35,
+    emissiveIntensity: 0.38,
   });
 
   const exhaust = new THREE.MeshStandardMaterial({
     color: 0x1a1a1a,
-    roughness: 0.55,
-    metalness: 0.55,
+    roughness: 0.52,
+    metalness: 0.58,
     emissive: COLORS.orangeHot,
-    emissiveIntensity: 0.85,
+    emissiveIntensity: 0.9,
   });
 
   const navRed = new THREE.MeshStandardMaterial({
@@ -171,8 +228,8 @@ export function createHeliMaterialKit(): HeliMaterialKit {
 
   const damageScar = new THREE.MeshStandardMaterial({
     color: 0x2a1810,
-    roughness: 0.85,
-    metalness: 0.15,
+    roughness: 0.88,
+    metalness: 0.12,
     emissive: COLORS.orangeHot,
     emissiveIntensity: 0,
     transparent: true,
@@ -227,17 +284,23 @@ function classifyMesh(name: string): 'body' | 'rotor' | 'weapon' | 'other' {
   const n = name.toLowerCase();
   if (n.includes('missile') || n.includes('weapon') || n.includes('rocket')) return 'weapon';
   if (n.includes('propeller') || n.includes('rotor') || n.includes('blade')) return 'rotor';
-  if (n.includes('body') || n.includes('helicopter')) return 'body';
+  if (n.includes('body') || n.includes('helicopter') || n.includes('heli')) return 'body';
   return 'other';
 }
 
 /**
- * Retune GLB MeshStandardMaterials in-place: keep albedo/normal maps,
- * push metalness/roughness into a current-gen PBR range, clone shared mats
- * so body / rotor / weapons can diverge.
+ * Retune GLB MeshStandardMaterials in-place (legacy path).
  */
 export function upgradeLoadedMaterials(root: THREE.Object3D, kit: HeliMaterialKit) {
-  const shared = new Map<THREE.Material, { body: THREE.MeshStandardMaterial; rotor: THREE.MeshStandardMaterial; weapon: THREE.MeshStandardMaterial; other: THREE.MeshStandardMaterial }>();
+  const shared = new Map<
+    THREE.Material,
+    {
+      body: THREE.MeshStandardMaterial;
+      rotor: THREE.MeshStandardMaterial;
+      weapon: THREE.MeshStandardMaterial;
+      other: THREE.MeshStandardMaterial;
+    }
+  >();
 
   root.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
@@ -262,6 +325,10 @@ export function upgradeLoadedMaterials(root: THREE.Object3D, kit: HeliMaterialKi
           base.color.set(0xffffff);
         }
         if (!base.roughnessMap) base.roughnessMap = kit.body.roughnessMap;
+        if (!base.normalMap && kit.body.normalMap) {
+          base.normalMap = kit.body.normalMap;
+          base.normalScale = kit.body.normalScale.clone();
+        }
 
         const body = base.clone();
         body.metalness = THREE.MathUtils.clamp(body.metalness || 0.32, 0.28, 0.48);
@@ -312,4 +379,16 @@ export function upgradeLoadedMaterials(root: THREE.Object3D, kit: HeliMaterialKi
     mesh.castShadow = true;
     mesh.receiveShadow = true;
   });
+}
+
+/** Tag procedural kit materials for runtime damage / boost response. */
+export function tagKitMaterials(kit: HeliMaterialKit) {
+  kit.body.userData.heliKind = 'body';
+  kit.body.userData.baseEmissiveIntensity = kit.body.emissiveIntensity;
+  kit.rotor.userData.heliKind = 'rotor';
+  kit.rotor.userData.baseEmissiveIntensity = kit.rotor.emissiveIntensity;
+  kit.weapon.userData.heliKind = 'weapon';
+  kit.weapon.userData.baseEmissiveIntensity = 0.12;
+  kit.accent.userData.heliKind = 'body';
+  kit.accent.userData.baseEmissiveIntensity = kit.accent.emissiveIntensity;
 }

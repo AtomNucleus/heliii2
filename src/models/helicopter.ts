@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { COLORS } from '../scene/setup';
-import { createHeliMaterialKit, upgradeLoadedMaterials } from './heliMaterials';
+import { createHeliMaterialKit, upgradeLoadedMaterials, tagKitMaterials } from './heliMaterials';
 import { attachHeliDetails } from './heliDetails';
 import { bindHeliVisualRuntime } from './heliVisuals';
+import { buildProceduralAttackHeli } from './heliProcedural';
 
 export type { HeliVisualUpdateInput } from './heliVisuals';
 export { updateHelicopterVisuals, getHeliVisualRuntime } from './heliVisuals';
+export { HELI_LOD, distanceToLod } from './heliLod';
 
 /** Target fuselage length in world units (arcade scale). */
 const TARGET_BODY_LENGTH = 4;
@@ -19,6 +20,9 @@ const TAIL_ROTOR_NAMES = [
   'Back_Propeller_Cube.004',
 ];
 const BODY_NAMES = ['Helicopter_Body_Cube001', 'Helicopter_Body_Cube.001'];
+
+/** Prefer cohesive procedural Attack Heli; set true to force legacy GLB. */
+const PREFER_PROCEDURAL = true;
 
 function enableShadows(root: THREE.Object3D) {
   root.traverse((obj) => {
@@ -51,7 +55,6 @@ function findByNameIncludes(root: THREE.Object3D, needles: string[]): THREE.Obje
 
 /**
  * Reparent meshes into a named spin group whose origin is at the meshes' combined center.
- * Local transforms are adjusted so world placement stays the same.
  */
 function wrapAsRotor(
   parent: THREE.Object3D,
@@ -110,17 +113,32 @@ function addRotorBlur(mainRotor: THREE.Group, radius: number, material?: THREE.M
   return blur;
 }
 
-/** Apply PBR kit + procedural details + runtime visual binder. */
-function finalizeHelicopterVisuals(heli: THREE.Group, fromGlb: boolean) {
-  const kit = createHeliMaterialKit();
-  if (fromGlb) {
+function finalizeHelicopterVisuals(
+  heli: THREE.Group,
+  opts: {
+    fromGlb: boolean;
+    procedural?: boolean;
+    nearOnly?: THREE.Object3D[];
+    midOnly?: THREE.Object3D[];
+    shadowCasters?: THREE.Object3D[];
+    kit?: ReturnType<typeof createHeliMaterialKit>;
+  },
+) {
+  const kit = opts.kit ?? createHeliMaterialKit();
+  tagKitMaterials(kit);
+  if (opts.fromGlb) {
     upgradeLoadedMaterials(heli, kit);
   }
 
   const mainRotor = heli.getObjectByName('mainRotor') as THREE.Group | null;
-  const details = attachHeliDetails(heli, kit, mainRotor);
-  bindHeliVisualRuntime(heli, kit, details);
+  const details = attachHeliDetails(heli, kit, mainRotor, { procedural: !!opts.procedural });
+  bindHeliVisualRuntime(heli, kit, details, {
+    nearOnly: opts.nearOnly,
+    midOnly: opts.midOnly,
+    shadowCasters: opts.shadowCasters,
+  });
   enableShadows(heli);
+  heli.userData.heliSource = opts.procedural ? 'procedural' : opts.fromGlb ? 'glb' : 'fallback';
   return heli;
 }
 
@@ -187,14 +205,29 @@ function prepareLoadedModel(gltfScene: THREE.Group): THREE.Group {
   const blurRadius = Math.max(rotorSize.x, rotorSize.z) * 0.48 || 1.9;
   addRotorBlur(mainRotor, blurRadius);
 
-  return finalizeHelicopterVisuals(heli, true);
+  return finalizeHelicopterVisuals(heli, { fromGlb: true, procedural: false });
 }
 
 /**
- * Load the textured Attack Chopper GLB and wire named rotor groups for the controller.
- * Applies current-gen PBR retune + procedural detail layer (no external assets).
+ * Load the player Attack Heli.
+ * Default: cohesive procedural current-gen silhouette + PBR detail layer.
+ * Legacy GLB retained (CC-BY Attack Chopper) when PREFER_PROCEDURAL is false
+ * or as an explicit fallback if procedural construction throws.
+ *
+ * API contract for controller / mission:
+ * - returns THREE.Group named `helicopter`
+ * - children include `mainRotor`, `tailRotor`, `rotorBlur`
+ * - call `updateHelicopterVisuals(heli, { dt, time, speed, health, cameraPosition })` each frame
  */
 export async function loadHelicopter(): Promise<THREE.Group> {
+  if (PREFER_PROCEDURAL) {
+    try {
+      return createHelicopter();
+    } catch (err) {
+      console.warn('Procedural heli failed, trying GLB', err);
+    }
+  }
+
   const loader = new GLTFLoader();
   try {
     const gltf = await loader.loadAsync('/models/helicopter.glb');
@@ -206,121 +239,20 @@ export async function loadHelicopter(): Promise<THREE.Group> {
 }
 
 /**
- * Procedural low-poly helicopter fallback (primitives).
- * Includes main rotor (blur disc), tail rotor, and the same detail / visual runtime as GLB.
+ * Procedural current-gen stylized attack helicopter (primary hero vehicle).
+ * Includes main/tail rotors, blur discs, and the shared detail / visual runtime.
  */
 export function createHelicopter(): THREE.Group {
-  const heli = new THREE.Group();
-  heli.name = 'helicopter';
-
   const kit = createHeliMaterialKit();
-  const bodyMat = kit.body;
-  const darkMat = kit.metalDark;
-  const accentMat = kit.accent;
-  const rotorMat = kit.rotor;
+  tagKitMaterials(kit);
+  const parts = buildProceduralAttackHeli(kit);
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.7, 2.4), bodyMat);
-  body.name = 'Helicopter_Body_Cube001';
-  body.position.y = 0.55;
-  body.castShadow = true;
-  heli.add(body);
-
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.1, 4), bodyMat);
-  nose.rotation.x = -Math.PI / 2;
-  nose.position.set(0, 0.5, 1.55);
-  nose.castShadow = true;
-  heli.add(nose);
-
-  // Canopy / interior come from attachHeliDetails (shared with GLB path).
-
-  const boom = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 2.2), darkMat);
-  boom.position.set(0, 0.65, -2.0);
-  boom.castShadow = true;
-  heli.add(boom);
-
-  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.7, 0.55), darkMat);
-  fin.position.set(0, 1.0, -3.0);
-  heli.add(fin);
-
-  const hStab = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.06, 0.35), darkMat);
-  hStab.position.set(0, 0.7, -2.95);
-  heli.add(hStab);
-
-  const skidGeo = new THREE.BoxGeometry(0.08, 0.08, 2.0);
-  const skidL = new THREE.Mesh(skidGeo, darkMat);
-  skidL.position.set(-0.55, 0.08, 0.1);
-  const skidR = skidL.clone();
-  skidR.position.x = 0.55;
-  heli.add(skidL, skidR);
-
-  const strutGeo = new THREE.BoxGeometry(0.06, 0.35, 0.06);
-  for (const x of [-0.55, 0.55]) {
-    for (const z of [-0.5, 0.6]) {
-      const strut = new THREE.Mesh(strutGeo, darkMat);
-      strut.position.set(x, 0.25, z);
-      heli.add(strut);
-    }
-  }
-
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.12, 1.6), accentMat);
-  stripe.position.set(0, 0.55, 0.1);
-  heli.add(stripe);
-
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.45, 6), rotorMat);
-  mast.position.set(0, 1.15, 0);
-  heli.add(mast);
-
-  const mainRotor = new THREE.Group();
-  mainRotor.name = 'mainRotor';
-  mainRotor.position.set(0, 1.38, 0);
-
-  const bladeGeo = new THREE.BoxGeometry(0.18, 0.03, 3.6);
-  const blade1 = new THREE.Mesh(bladeGeo, rotorMat);
-  blade1.name = 'Propellers_Cube000';
-  const blade2 = new THREE.Mesh(bladeGeo, rotorMat);
-  blade2.rotation.y = Math.PI / 2;
-  mainRotor.add(blade1, blade2);
-  addRotorBlur(mainRotor, 1.9, kit.rotorBlur);
-  heli.add(mainRotor);
-
-  const tailRotor = new THREE.Group();
-  tailRotor.name = 'tailRotor';
-  tailRotor.position.set(0.18, 0.95, -3.05);
-
-  const tBlade = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.7, 0.04), rotorMat);
-  tBlade.name = 'Back_Propeller_Cube004';
-  const tBlade2 = tBlade.clone();
-  tBlade2.rotation.z = Math.PI / 2;
-  tailRotor.add(tBlade, tBlade2);
-  heli.add(tailRotor);
-
-  // Placeholder missiles so weapon material path is exercised offline
-  for (const side of [-1, 1]) {
-    const missile = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.06, 0.06, 0.7, 6),
-      kit.weapon,
-    );
-    missile.name = side < 0 ? 'Missiles_Cube007' : 'Missiles001_Cube007';
-    missile.rotation.x = Math.PI / 2;
-    missile.position.set(side * 0.85, 0.4, 0.2);
-    heli.add(missile);
-  }
-
-  const exhaust = new THREE.Mesh(
-    new THREE.BoxGeometry(0.25, 0.2, 0.3),
-    new THREE.MeshStandardMaterial({
-      color: 0x222222,
-      emissive: COLORS.orangeHot,
-      emissiveIntensity: 0.6,
-      flatShading: true,
-    }),
-  );
-  exhaust.position.set(0, 0.45, -1.15);
-  heli.add(exhaust);
-
-  // Skip second material upgrade pass — kit already applied; still attach details.
-  const details = attachHeliDetails(heli, kit, mainRotor);
-  bindHeliVisualRuntime(heli, kit, details);
-  enableShadows(heli);
-  return heli;
+  return finalizeHelicopterVisuals(parts.root, {
+    fromGlb: false,
+    procedural: true,
+    kit,
+    nearOnly: parts.nearGreebles,
+    midOnly: parts.midParts,
+    shadowCasters: parts.shadowCasters,
+  });
 }
