@@ -25,13 +25,14 @@ VisualEffects
 
 ## Dependencies
 
-| Package | Version | Role |
-|---------|---------|------|
+| Package                     | Version  | Role                                                         |
+| --------------------------- | -------- | ------------------------------------------------------------ |
 | `@dimforge/rapier3d-compat` | `0.19.3` | Latest stable Rapier WASM (base64-inlined, bundler-friendly) |
 
 ## Files changed / added
 
 ### Physics
+
 - `src/physics/budgets.ts` — tier caps, slot allocation (pure)
 - `src/physics/fragments.ts` — deterministic fragment generation (pure)
 - `src/physics/lifecycle.ts` — sleep / distance / lifetime cull policy (pure)
@@ -41,12 +42,14 @@ VisualEffects
 - `src/physics/physics.test.ts` — unit tests
 
 ### Integration
+
 - `src/effects/combat/debris.ts` — prefers shared Rapier world
 - `src/collision/destructible.ts` — prop shatter spawns into shared world
 - `src/effects/combat/CombatFx.ts` / `src/combat/effects.ts` — `bindDebrisPhysics`
 - `src/main.ts` — async physics boot, bind water + debris
 
 ### Visual fidelity
+
 - `src/effects/waterResponse.ts` — richer water / wake (no SSR claim)
 - `src/effects/lightShafts.ts` — sunset shafts (MeshBasic, dual-backend)
 - `src/effects/contactShadow.ts` — soft contact blob
@@ -57,11 +60,11 @@ VisualEffects
 
 ## Performance budgets (debris)
 
-| Tier | maxBodies | maxPerBurst | stepHz | notes |
-|------|-----------|-------------|--------|-------|
-| low | 12 | 4 | 30 | shafts off; contact shadow on |
-| medium | 24 | 7 | 45 | 3 shafts |
-| high | 40 | 10 | 60 | 5 shafts |
+| Tier   | maxBodies | maxPerBurst | stepHz | notes                         |
+| ------ | --------- | ----------- | ------ | ----------------------------- |
+| low    | 12        | 4           | 30     | shafts off; contact shadow on |
+| medium | 24        | 7           | 45     | 3 shafts                      |
+| high   | 40        | 10          | 60     | 5 shafts                      |
 
 Cull policy: max lifetime, sleep/slow after min life, distance from follow target, excess drop on quality downshift.
 

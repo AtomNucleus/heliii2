@@ -105,4 +105,59 @@ test.describe('HELI SUNSET smoke', () => {
     expect(pageErrors, `Unexpected page errors:\n${pageErrors.join('\n')}`).toEqual([]);
     expect(consoleErrors, `Unexpected console errors:\n${consoleErrors.join('\n')}`).toEqual([]);
   });
+
+  test('PWA manifest and UI shell are present without requiring install prompt', async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { pageErrors, consoleErrors } = attachErrorCollectors(page);
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expectShellVisible(page);
+
+    // Manifest is emitted by vite-plugin-pwa into the production build.
+    const manifestLink = page.locator('link[rel="manifest"]');
+    await expect(manifestLink).toHaveCount(1);
+    const manifestHref = await manifestLink.getAttribute('href');
+    expect(manifestHref).toBeTruthy();
+
+    const manifestUrl = new URL(manifestHref!, page.url()).toString();
+    const manifestRes = await request.get(manifestUrl);
+    expect(manifestRes.ok()).toBeTruthy();
+    const manifest = await manifestRes.json();
+    expect(manifest.name).toMatch(/HELI\s*SUNSET/i);
+    expect(manifest.short_name).toMatch(/HELI\s*SUNSET/i);
+    expect(manifest.display).toBe('standalone');
+    expect(manifest.orientation).toBe('landscape');
+    expect(manifest.theme_color).toBe('#061018');
+    expect(manifest.background_color).toBe('#061018');
+    expect(manifest.start_url).toMatch(/^\.\/?$/);
+    expect(manifest.scope).toMatch(/^\.\/?$/);
+    expect(Array.isArray(manifest.icons)).toBeTruthy();
+    expect(manifest.icons.length).toBeGreaterThanOrEqual(2);
+    expect(Array.isArray(manifest.categories)).toBeTruthy();
+    expect(manifest.categories.includes('games')).toBeTruthy();
+
+    // UI shell exists and stays hidden until real install/update events (no fake CTA).
+    const update = page.locator('#pwa-update');
+    const install = page.locator('#pwa-install');
+    await expect(update).toBeAttached();
+    await expect(install).toBeAttached();
+    await expect(update).toBeHidden();
+    await expect(install).toBeHidden();
+
+    // Controller exposes testable data attributes on #app.
+    await expect(page.locator('#app')).toHaveAttribute('data-pwa-sw', /.+/);
+    await expect(page.locator('#app')).toHaveAttribute('data-pwa-update', 'none');
+    await expect(page.locator('#app')).toHaveAttribute('data-pwa-install', /.+/);
+
+    // Service worker script is part of the production build (registration is best-effort).
+    const swRes = await request.get(new URL('./sw.js', page.url()).toString());
+    expect(swRes.ok()).toBeTruthy();
+
+    expect(pageErrors, `Unexpected page errors:\n${pageErrors.join('\n')}`).toEqual([]);
+    expect(consoleErrors, `Unexpected console errors:\n${consoleErrors.join('\n')}`).toEqual([]);
+  });
 });

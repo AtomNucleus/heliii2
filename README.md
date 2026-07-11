@@ -6,7 +6,7 @@ Fly a neon strike run over the **Fruzer Polygon** map (Chicken Gun–style battl
 
 ## Project status
 
-TypeScript / Three.js / Vite game sources are in place. This branch adds project foundation: npm scripts for lint/format/test, GitHub Actions CI, and a Playwright Chromium smoke test against the production build.
+TypeScript / Three.js / Vite game sources are in place. This branch includes project foundation (lint/format/test/CI), Playwright smoke coverage, and production **PWA / offline** support via `vite-plugin-pwa`.
 
 ## Play
 
@@ -30,6 +30,8 @@ npm run dev
 
 Open the URL Vite prints (default `http://localhost:5173`).
 
+**PWA note:** the service worker is **not** registered in `vite` dev mode (`devOptions.enabled: false`). That keeps HMR reliable and avoids stale-cache surprises while iterating. Use a production build + `npm run preview` (or Netlify) to exercise install/offline.
+
 ## Build
 
 ```bash
@@ -41,6 +43,35 @@ Preview the production build:
 ```bash
 npm run preview
 ```
+
+## PWA / offline
+
+Production builds ship:
+
+- Web app manifest (`manifest.webmanifest`) — name **HELI SUNSET**, `standalone`, `landscape`, theme/background `#061018`, relative `scope` / `start_url` (`./`) for Vite `base: './'` and Netlify
+- Icons under `public/icons/` (authored SVG + PNG / maskable sizes)
+- Workbox service worker that precaches the game shell, hashed assets, map/heli GLBs, and Draco decoder (max file size **5 MiB**)
+- Cautious updates: when a new SW is waiting, a HUD-styled banner offers **Reload** / **Apply later** — activation never auto-interrupts an active mission
+- Install affordance only after a real `beforeinstallprompt` (dismissible; hidden on unsupported browsers / already-installed / standalone)
+
+Runtime state is exposed on `#app` for debugging/tests:
+
+- `data-pwa-sw` — `unsupported` | `pending` | `registered` | `waiting` | `controlling`
+- `data-pwa-update` — `none` | `available` | `deferred` | `reloading`
+- `data-pwa-install` — `unsupported` | `available` | `dismissed` | `installed` | `standalone`
+- `data-pwa-offline-ready` — `true` after first successful precache
+
+Pure update/install policy lives in `src/pwa/policy.ts` (unit-tested).
+
+### Platform limits
+
+| Surface                    | Notes                                                                                              |
+| -------------------------- | -------------------------------------------------------------------------------------------------- |
+| Chromium desktop / Android | Full install prompt + offline after first load                                                     |
+| Safari iOS                 | No `beforeinstallprompt`; Add to Home Screen is manual. SW caching works on supported iOS versions |
+| Firefox                    | Install UI varies; SW offline works                                                                |
+| Dev server                 | No SW on purpose                                                                                   |
+| Fonts                      | Google Fonts CSS is network-fetched; offline may fall back to system fonts                         |
 
 ## Lint and format
 
@@ -55,7 +86,8 @@ Prettier is configured for configs, scripts, e2e, docs, and the HTML shell. `src
 
 ```bash
 npm test                 # unit + verification scripts
-npm run test:unit        # Node unit tests (combat AI, render prefs, physics budgets)
+npm run test:unit        # Node unit tests (combat AI, render prefs, physics, PWA policy)
+npm run test:pwa         # PWA update/install policy only
 npm run test:physics     # Rapier debris budget / fragment / lifecycle policies
 npm run test:collision   # collision math verification
 npm run test:mission     # mission authoring verification

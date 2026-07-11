@@ -12,6 +12,7 @@ import { getGameAudio } from './audio';
 import { StrikeMission, formatEndSubtitle, type StrikeEndSummary } from './mission';
 import { applyRendererDiagnostics } from './render';
 import { ensureSharedDebrisPhysics, getSharedDebrisPhysics, setSharedDebrisPhysics } from './physics';
+import { initPwa, type PwaController } from './pwa';
 
 type GamePhase = 'loading' | 'start' | 'playing' | 'complete' | 'failed';
 
@@ -38,6 +39,7 @@ let mission: StrikeMission;
 let hud: HUD;
 let heli: THREE.Group;
 let mobileControls: MobileControls;
+let pwa: PwaController | null = null;
 
 let phase: GamePhase = 'loading';
 let clock = new THREE.Clock();
@@ -72,6 +74,10 @@ function syncHud() {
   hud.setCrosshairState(state.aimLocked ? 'lock' : 'idle');
 }
 
+function notifyPwaPhase() {
+  pwa?.refresh();
+}
+
 function startGame() {
   if (!ready || phase === 'loading') return;
   phase = 'playing';
@@ -94,6 +100,7 @@ function startGame() {
   audio.handleEvent({ type: 'mission-start' });
   audio.startFlightAmbience();
   clock.start();
+  notifyPwaPhase();
 }
 
 function finishMission(summary: StrikeEndSummary) {
@@ -111,6 +118,7 @@ function finishMission(summary: StrikeEndSummary) {
     kills: summary.kills,
     combo: summary.bestCombo,
   });
+  notifyPwaPhase();
 }
 
 function restartGame() {
@@ -587,6 +595,7 @@ async function boot() {
     setLoadingText('');
     startBtn.disabled = false;
     startBtn.textContent = 'START OPERATION';
+    notifyPwaPhase();
   } catch (err) {
     console.error(err);
     setLoadingText('Failed to load map. Check console / refresh.');
@@ -598,6 +607,13 @@ async function main() {
   setLoadingText('Initializing renderer…');
   startBtn.disabled = true;
   startBtn.textContent = 'LOADING…';
+
+  if (appRoot) {
+    pwa = await initPwa({
+      root: appRoot,
+      getMissionSafety: () => (phase === 'playing' ? 'active' : 'safe'),
+    });
+  }
 
   try {
     sceneSetup = await createSceneSetup(canvas);
