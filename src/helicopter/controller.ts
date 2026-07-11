@@ -21,7 +21,12 @@ import {
   getShakeTrauma,
   type ChaseCameraState,
 } from './chaseCamera';
-import type { ImpactKind, WorldCollision, WorldImpactResult } from '../collision';
+import type {
+  ImpactKind,
+  ProximityWarning,
+  WorldCollision,
+  WorldImpactResult,
+} from '../collision';
 
 export interface InputState {
   forward: boolean;
@@ -62,11 +67,15 @@ export interface DamageState {
 }
 
 export interface ImpactEventInfo {
-  source: 'ground' | 'building';
+  source: 'ground' | 'building' | 'prop';
   kind: ImpactKind;
   scrape: boolean;
   crash: boolean;
   closingSpeed: number;
+  destroyedProp?: boolean;
+  nearGroundAssist?: number;
+  colliderId?: number;
+  tag?: string;
 }
 
 function createInputState(): InputState {
@@ -121,6 +130,7 @@ export class HelicopterController {
   private boundPressure = 0;
   private worldCollision: WorldCollision | null = null;
   private lastWorldImpact: WorldImpactResult | null = null;
+  private lastProximity: ProximityWarning | null = null;
   private scrapeShakeTimer = 0;
   private scrapeNotifyCooldown = 0;
 
@@ -165,6 +175,15 @@ export class HelicopterController {
 
   getLastWorldImpact(): WorldImpactResult | null {
     return this.lastWorldImpact;
+  }
+
+  /** Latest obstacle proximity warning (0..3). */
+  getProximityWarning(): ProximityWarning | null {
+    return this.lastProximity ?? this.worldCollision?.getLastProximity() ?? null;
+  }
+
+  getProximityLevel(): number {
+    return this.getProximityWarning()?.level ?? 0;
   }
 
   private bindInput() {
@@ -269,8 +288,10 @@ export class HelicopterController {
     this.boundPressure = 0;
     this.damage = { health: 100, lastImpact: 0, totalDamage: 0 };
     this.lastWorldImpact = null;
+    this.lastProximity = null;
     this.scrapeShakeTimer = 0;
     this.scrapeNotifyCooldown = 0;
+    this.worldCollision?.reset();
     resetChaseCamera(this.camState, spawn);
     this.camera.fov = this.camState.currentFov;
     this.camera.updateProjectionMatrix();
@@ -467,17 +488,32 @@ export class HelicopterController {
         dt,
       );
       this.lastWorldImpact = worldHit;
+      this.lastProximity = this.worldCollision.getLastProximity();
       if (worldHit.contact.hit) {
         if (worldHit.scrape) {
           this.scrapeShakeTimer = Math.max(this.scrapeShakeTimer, 0.12);
         }
+        const src: ImpactEventInfo['source'] =
+          worldHit.contact.kind === 'prop' ? 'prop' : 'building';
         this.applyImpactDamage(worldHit.intensity, worldHit.damage, {
-          source: 'building',
+          source: src,
           kind: worldHit.impactKind,
           scrape: worldHit.scrape,
           crash: worldHit.crash,
           closingSpeed: worldHit.closingSpeed,
+          destroyedProp: worldHit.destroyedPropId >= 0,
+          nearGroundAssist: worldHit.nearGroundAssist,
+          colliderId: worldHit.contact.colliderId,
         });
+      }
+      // Subtle shake when proximity is critical and closing fast
+      if (
+        this.lastProximity &&
+        this.lastProximity.level >= 3 &&
+        this.lastProximity.ahead &&
+        this.getSpeed() > 18
+      ) {
+        triggerCameraShake(this.camState, 0.04 * dt * 8);
       }
     }
 

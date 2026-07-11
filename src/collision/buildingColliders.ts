@@ -92,7 +92,7 @@ export function extractBuildingColliders(
 
     // Inflate slightly so thin walls still catch the heli sphere
     const pad = kind === 'building' ? 0.15 : 0.08;
-    raw.push({
+    const entry: ColliderAABB = {
       id: nextId++,
       minX: minX - pad,
       minY,
@@ -101,7 +101,15 @@ export function extractBuildingColliders(
       maxY: maxY + (kind === 'building' ? 0.2 : 0),
       maxZ: maxZ + pad,
       kind,
-    });
+      active: true,
+    };
+    // Small props are destructible — crates / barriers shatter on hard hits
+    if (kind === 'prop' && height < 4.5 && footprint < 28) {
+      const mass = Math.sqrt(footprint) * height;
+      entry.maxHp = THREE.MathUtils.clamp(18 + mass * 2.2, 18, 55);
+      entry.hp = entry.maxHp;
+    }
+    raw.push(entry);
   }
 
   // Prefer buildings; drop excess tiny props if over budget

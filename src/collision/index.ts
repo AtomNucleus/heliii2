@@ -2,8 +2,13 @@ export type {
   ColliderAABB,
   ContactInfo,
   CollisionDebugStats,
+  DestructResult,
   HeliCollisionShape,
+  ImpactFeedbackEvent,
   ImpactKind,
+  NearGroundResult,
+  ProceduralColliderSpec,
+  ProximityWarning,
   WorldImpactResult,
 } from './types';
 
@@ -21,7 +26,14 @@ export {
   queryDeepestContact,
   resolveWorldImpact,
   collideAndResolve,
+  applyNearGroundAssist,
   getLastQueryCount,
 } from './resolve';
 export { CollisionDebugOverlay, wantCollisionDebug } from './debug';
 export { WorldCollision } from './worldCollision';
+export { queryProximity, PROXIMITY, getLastProximityQueryCount } from './proximity';
+export {
+  applyDestructibleHit,
+  DebrisSystem,
+  DESTRUCT,
+} from './destructible';

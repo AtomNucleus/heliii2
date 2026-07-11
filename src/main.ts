@@ -239,7 +239,23 @@ async function boot() {
     }
     if (world.collision) {
       world.collision.attachDebug(scene);
+      world.collision.setGroundHeightSampler(world.getGroundHeight);
       controller.setWorldCollision(world.collision);
+
+      world.collision.onProximity = (warning) => {
+        if (phase !== 'playing') return;
+        if (warning.level >= 3) {
+          hud.toast('TERRAIN ALERT', 0.7);
+        } else if (warning.level === 2 && warning.ahead) {
+          hud.toast('OBSTACLE AHEAD', 0.65);
+        }
+      };
+      world.collision.onPropDestroyed = () => {
+        if (phase !== 'playing') return;
+        hud.toast('PROP DESTROYED', 0.9);
+        audio.playImpact(0.45, 'soft');
+        controller.addCameraShake(0.22);
+      };
     }
     controller.reset(world.spawnPosition);
 
@@ -304,14 +320,22 @@ async function boot() {
 
     controller.onImpact = (intensity, damage, info) => {
       const source =
-        info?.source === 'building'
-          ? info.crash
-            ? 'building-crash'
-            : info.scrape
-              ? 'building-scrape'
-              : 'building-impact'
-          : 'hard-landing';
+        info?.source === 'prop'
+          ? info.destroyedProp
+            ? 'prop-destroy'
+            : 'prop-impact'
+          : info?.source === 'building'
+            ? info.crash
+              ? 'building-crash'
+              : info.scrape
+                ? 'building-scrape'
+                : 'building-impact'
+            : 'hard-landing';
       if (damage > 0) mission.applyExternalDamage(damage, source);
+      if (info?.destroyedProp) {
+        audio.playImpact(Math.max(0.35, intensity), 'hard');
+        return;
+      }
       if (info?.scrape && !info.crash) {
         audio.playImpact(Math.max(0.25, intensity), damage > 0 ? 'soft' : 'soft');
       } else {
@@ -332,6 +356,18 @@ async function boot() {
         const s = world.collision.getStats();
         console.info('[collision] debug', s);
       }
+    });
+
+    // V = dump collision coverage / cost snapshot
+    window.addEventListener('keydown', (e) => {
+      if (e.code !== 'KeyV' || e.repeat) return;
+      if (!world.collision) return;
+      const s = world.collision.getStats();
+      console.info('[collision] coverage', s);
+      hud.toast(
+        `COL ${s.activeColliders}/${s.colliderCount} · Q${s.lastQueryCount} · ${s.lastResolveMs.toFixed(2)}ms`,
+        1.6,
+      );
     });
 
     mobileControls = new MobileControls({

@@ -74,6 +74,8 @@ export class SpatialHash {
         for (let i = 0; i < bucket.length; i++) {
           const id = bucket[i];
           if (seen.has(id)) continue;
+          const c = this.colliders[id];
+          if (!c || c.active === false) continue;
           seen.add(id);
           out.push(id);
         }
@@ -84,6 +86,56 @@ export class SpatialHash {
 
   getCollider(id: number): ColliderAABB | undefined {
     return this.colliders[id];
+  }
+
+  /**
+   * Append a collider and bucket it (procedural / mission set-pieces).
+   * Returns the assigned id.
+   */
+  addCollider(partial: Omit<ColliderAABB, 'id'> & { id?: number }): number {
+    const id = this.colliders.length;
+    const entry: ColliderAABB = {
+      ...partial,
+      id,
+      active: partial.active !== false,
+    };
+    this.colliders.push(entry);
+    this.insert(entry);
+    return id;
+  }
+
+  /** Soft-disable without rebuilding buckets (destructible props). */
+  setActive(id: number, active: boolean): boolean {
+    const c = this.colliders[id];
+    if (!c) return false;
+    c.active = active;
+    return true;
+  }
+
+  isActive(id: number): boolean {
+    const c = this.colliders[id];
+    return !!c && c.active !== false;
+  }
+
+  activeCount(): number {
+    let n = 0;
+    for (let i = 0; i < this.colliders.length; i++) {
+      if (this.colliders[i].active !== false) n++;
+    }
+    return n;
+  }
+
+  /** Restore HP + active for all destructible props (mission reset). */
+  resetDestructibles(): number {
+    let n = 0;
+    for (let i = 0; i < this.colliders.length; i++) {
+      const c = this.colliders[i];
+      if (c.maxHp === undefined) continue;
+      c.hp = c.maxHp;
+      c.active = true;
+      n++;
+    }
+    return n;
   }
 
   all(): readonly ColliderAABB[] {

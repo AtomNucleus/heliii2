@@ -620,6 +620,7 @@ export async function loadMapWorld(
       minBuildingHeight: 2.0,
       minFootprint: 2.2,
     });
+    collision.setGroundHeightSampler(getGroundHeight);
   } catch (err) {
     console.warn('[map] building collision bake failed', err);
   }

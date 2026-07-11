@@ -1,6 +1,13 @@
 import * as THREE from 'three';
-import type { ColliderAABB, ContactInfo, HeliCollisionShape, WorldImpactResult } from './types';
+import type {
+  ColliderAABB,
+  ContactInfo,
+  HeliCollisionShape,
+  NearGroundResult,
+  WorldImpactResult,
+} from './types';
 import type { SpatialHash } from './spatialHash';
+import { applyDestructibleHit } from './destructible';
 
 /** Arcade heli body sphere — matches ~TARGET_BODY_LENGTH scale. */
 export const HELI_COLLISION: HeliCollisionShape = {
@@ -23,6 +30,10 @@ export interface ResolveTunables {
   scrapeFriction: number;
   crashRestitution: number;
   scrapeRestitution: number;
+  /** Soft-landing cushion height above ground / rooftops (m). */
+  nearGroundHeight: number;
+  /** Max vertical closing speed bleed from near-ground assist. */
+  nearGroundBleed: number;
 }
 
 export const RESOLVE: ResolveTunables = {
@@ -33,6 +44,8 @@ export const RESOLVE: ResolveTunables = {
   scrapeFriction: 0.94,
   crashRestitution: 0.22,
   scrapeRestitution: 0.05,
+  nearGroundHeight: 7.5,
+  nearGroundBleed: 0.42,
 };
 
 const _center = new THREE.Vector3();
@@ -49,6 +62,20 @@ function emptyContact(): ContactInfo {
     push: _push.set(0, 0, 0).clone(),
     colliderId: -1,
     kind: 'none',
+  };
+}
+
+function emptyImpact(contact: ContactInfo = emptyContact()): WorldImpactResult {
+  return {
+    intensity: 0,
+    damage: 0,
+    scrape: false,
+    crash: false,
+    impactKind: 'none',
+    closingSpeed: 0,
+    contact,
+    destroyedPropId: -1,
+    nearGroundAssist: 0,
   };
 }
 
@@ -149,25 +176,74 @@ export function queryDeepestContact(
 }
 
 /**
+ * Soft-landing cushion when descending toward ground or a rooftop.
+ * Preserves flight feel — only bleeds excess vertical closing speed.
+ */
+export function applyNearGroundAssist(
+  position: THREE.Vector3,
+  velocity: THREE.Vector3,
+  groundY: number,
+  hash: SpatialHash | null,
+  shape: HeliCollisionShape = HELI_COLLISION,
+  tunables: ResolveTunables = RESOLVE,
+): NearGroundResult {
+  let surfaceY = groundY;
+  // Sample nearby rooftops under the craft (cheap hash query)
+  if (hash) {
+    _center.set(position.x, position.y + shape.centerY, position.z);
+    const pad = shape.radius + 1.5;
+    const count = hash.queryIds(
+      _center.x - pad,
+      _center.x + pad,
+      _center.z - pad,
+      _center.z + pad,
+      _queryIds,
+    );
+    for (let i = 0; i < count; i++) {
+      const box = hash.getCollider(_queryIds[i]);
+      if (!box) continue;
+      if (_center.x < box.minX - 0.5 || _center.x > box.maxX + 0.5) continue;
+      if (_center.z < box.minZ - 0.5 || _center.z > box.maxZ + 0.5) continue;
+      // Only consider tops below the craft
+      if (box.maxY > position.y + 0.5) continue;
+      if (box.maxY > surfaceY) surfaceY = box.maxY;
+    }
+  }
+
+  const clearance = position.y - surfaceY - shape.radius * 0.35;
+  const band = tunables.nearGroundHeight;
+  if (clearance >= band || velocity.y >= -1.5) {
+    return { assist: 0, verticalClosing: Math.max(0, -velocity.y), flared: false };
+  }
+
+  const t = THREE.MathUtils.clamp(1 - clearance / band, 0, 1);
+  const assist = t * t;
+  const closing = Math.max(0, -velocity.y);
+  // Bleed only the excess — keep intentional landings responsive
+  const bleed = assist * tunables.nearGroundBleed * closing;
+  if (bleed > 0.05 && velocity.y < 0) {
+    velocity.y += bleed;
+  }
+  return {
+    assist,
+    verticalClosing: Math.max(0, -velocity.y),
+    flared: assist > 0.35 && closing > 8,
+  };
+}
+
+/**
  * Apply contact: push-out, slide/scrape or crash bounce, damage.
- * Mutates position + velocity.
+ * Mutates position + velocity. Optionally damages destructible props.
  */
 export function resolveWorldImpact(
   position: THREE.Vector3,
   velocity: THREE.Vector3,
   contact: ContactInfo,
   tunables: ResolveTunables = RESOLVE,
+  hash?: SpatialHash | null,
 ): WorldImpactResult {
   if (!contact.hit || contact.penetration < MIN_PENETRATION) {
-    return {
-      intensity: 0,
-      damage: 0,
-      scrape: false,
-      crash: false,
-      impactKind: 'none',
-      closingSpeed: 0,
-      contact,
-    };
+    return emptyImpact(contact);
   }
 
   position.add(contact.push);
@@ -205,6 +281,7 @@ export function resolveWorldImpact(
   let scrape = false;
   let crash = false;
   let impactKind: WorldImpactResult['impactKind'] = 'none';
+  let destroyedPropId = -1;
 
   if (closingSpeed >= tunables.crashSpeed) {
     crash = true;
@@ -235,6 +312,26 @@ export function resolveWorldImpact(
     intensity = THREE.MathUtils.clamp(closingSpeed / tunables.scrapeSpeed, 0, 1) * 0.12;
   }
 
+  // Destructible props absorb impact energy and may shatter
+  if (hash && contact.colliderId >= 0 && (crash || closingSpeed >= 7)) {
+    const dest = applyDestructibleHit(
+      hash,
+      contact.colliderId,
+      closingSpeed,
+      crash,
+    );
+    if (dest.destroyed) {
+      destroyedPropId = dest.colliderId;
+      // Prop ate the hit — soften hull damage
+      damage *= 0.35;
+      intensity = Math.min(intensity, 0.55);
+      // Extra outward kick so we don't re-penetrate debris volume
+      velocity.addScaledVector(n, Math.min(8, closingSpeed * 0.25));
+    } else if (dest.impulse > 0 && contact.kind === 'prop') {
+      damage *= 0.75;
+    }
+  }
+
   return {
     intensity,
     damage,
@@ -243,6 +340,8 @@ export function resolveWorldImpact(
     impactKind,
     closingSpeed,
     contact,
+    destroyedPropId,
+    nearGroundAssist: 0,
   };
 }
 
@@ -257,7 +356,7 @@ export function collideAndResolve(
   tunables?: ResolveTunables,
 ): WorldImpactResult {
   const contact = queryDeepestContact(position, shape, hash);
-  return resolveWorldImpact(position, velocity, contact, tunables);
+  return resolveWorldImpact(position, velocity, contact, tunables, hash);
 }
 
 /** Expose last broadphase query size for debug HUD. */

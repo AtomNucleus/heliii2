@@ -1,5 +1,10 @@
 import * as THREE from 'three';
-import type { ColliderAABB, CollisionDebugStats, ImpactKind } from './types';
+import type {
+  ColliderAABB,
+  CollisionDebugStats,
+  ImpactKind,
+  ProximityWarning,
+} from './types';
 import type { SpatialHash } from './spatialHash';
 import { HELI_COLLISION } from './resolve';
 
@@ -18,10 +23,13 @@ export class CollisionDebugOverlay {
   private readonly boxGroup = new THREE.Group();
   private readonly heliMesh: THREE.Mesh;
   private readonly normalHelper: THREE.ArrowHelper;
+  private readonly proxHelper: THREE.ArrowHelper;
+  private readonly boxById = new Map<number, THREE.LineSegments>();
   private enabled = false;
   private hash: SpatialHash | null = null;
   private stats: CollisionDebugStats = {
     colliderCount: 0,
+    activeColliders: 0,
     hashCells: 0,
     lastQueryCount: 0,
     lastHit: false,
@@ -29,6 +37,10 @@ export class CollisionDebugOverlay {
     lastClosingSpeed: 0,
     lastDamage: 0,
     lastResolveMs: 0,
+    debrisAlive: 0,
+    propsDestroyed: 0,
+    proximityLevel: 0,
+    proximityDistance: 999,
   };
 
   constructor() {
@@ -59,6 +71,17 @@ export class CollisionDebugOverlay {
     );
     this.normalHelper.visible = false;
     this.group.add(this.normalHelper);
+
+    this.proxHelper = new THREE.ArrowHelper(
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(),
+      8,
+      0xffaa00,
+      0.8,
+      0.4,
+    );
+    this.proxHelper.visible = false;
+    this.group.add(this.proxHelper);
   }
 
   attach(scene: THREE.Scene) {
@@ -73,7 +96,17 @@ export class CollisionDebugOverlay {
     this.hash = hash;
     this.rebuildBoxes();
     this.stats.colliderCount = hash?.size ?? 0;
+    this.stats.activeColliders = hash?.activeCount() ?? 0;
     this.stats.hashCells = hash?.cellCount ?? 0;
+  }
+
+  /** Dim a shattered / disabled collider in the overlay. */
+  markInactive(id: number) {
+    const line = this.boxById.get(id);
+    if (!line) return;
+    const mat = line.material as THREE.LineBasicMaterial;
+    mat.opacity = 0.08;
+    mat.color.setHex(0x666666);
   }
 
   isEnabled(): boolean {
@@ -95,7 +128,7 @@ export class CollisionDebugOverlay {
     return { ...this.stats };
   }
 
-  recordFrame( partial: Partial<CollisionDebugStats>) {
+  recordFrame(partial: Partial<CollisionDebugStats>) {
     Object.assign(this.stats, partial);
   }
 
@@ -104,6 +137,7 @@ export class CollisionDebugOverlay {
     contactNormal?: THREE.Vector3 | null,
     hit = false,
     impactKind: ImpactKind = 'none',
+    proximity?: ProximityWarning | null,
   ) {
     if (!this.enabled) return;
     this.heliMesh.position.set(
@@ -114,6 +148,7 @@ export class CollisionDebugOverlay {
     const mat = this.heliMesh.material as THREE.MeshBasicMaterial;
     if (impactKind === 'crash') mat.color.setHex(0xff2244);
     else if (impactKind === 'scrape') mat.color.setHex(0xffaa22);
+    else if (proximity && proximity.level >= 2) mat.color.setHex(0xffee55);
     else mat.color.setHex(0x33ff99);
 
     if (hit && contactNormal) {
@@ -122,6 +157,25 @@ export class CollisionDebugOverlay {
       this.normalHelper.setDirection(contactNormal.clone().normalize());
     } else {
       this.normalHelper.visible = false;
+    }
+
+    if (proximity && proximity.level > 0 && Number.isFinite(proximity.distance)) {
+      this.proxHelper.visible = true;
+      this.proxHelper.position.copy(this.heliMesh.position);
+      this.proxHelper.setDirection(proximity.direction.clone().normalize());
+      this.proxHelper.setLength(
+        Math.min(18, Math.max(2, proximity.distance)),
+        0.7,
+        0.35,
+      );
+      const proxMat = this.proxHelper.line.material as THREE.LineBasicMaterial;
+      const coneMat = this.proxHelper.cone.material as THREE.MeshBasicMaterial;
+      const col =
+        proximity.level >= 3 ? 0xff2244 : proximity.level === 2 ? 0xff8800 : 0xffcc44;
+      proxMat.color.setHex(col);
+      coneMat.color.setHex(col);
+    } else {
+      this.proxHelper.visible = false;
     }
   }
 
@@ -132,6 +186,7 @@ export class CollisionDebugOverlay {
       mesh.geometry?.dispose();
       (mesh.material as THREE.Material)?.dispose?.();
     }
+    this.boxById.clear();
     if (!this.hash) return;
 
     const colliders = this.hash.all();
@@ -145,12 +200,19 @@ export class CollisionDebugOverlay {
       const geo = new THREE.BoxGeometry(sx, sy, sz);
       const edges = new THREE.EdgesGeometry(geo);
       geo.dispose();
+      const inactive = c.active === false;
       const line = new THREE.LineSegments(
         edges,
         new THREE.LineBasicMaterial({
-          color: KIND_COLOR[c.kind],
+          color: inactive ? 0x666666 : KIND_COLOR[c.kind],
           transparent: true,
-          opacity: c.kind === 'building' ? 0.55 : 0.35,
+          opacity: inactive
+            ? 0.08
+            : c.kind === 'building'
+              ? 0.55
+              : c.hp !== undefined
+                ? 0.45
+                : 0.35,
         }),
       );
       line.position.set(
@@ -159,6 +221,7 @@ export class CollisionDebugOverlay {
         (c.minZ + c.maxZ) * 0.5,
       );
       this.boxGroup.add(line);
+      this.boxById.set(c.id, line);
     }
   }
 }
