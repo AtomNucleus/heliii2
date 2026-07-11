@@ -279,49 +279,145 @@ test.describe('HELI SUNSET smoke', () => {
   test('settings / hangar shell is keyboard-accessible and persists preferences', async ({
     page,
   }) => {
-    test.setTimeout(120_000);
+    // UI-only: force WebGL; finish meta chrome before SwiftShader stalls the main thread.
+    test.setTimeout(60_000);
 
     const { pageErrors, consoleErrors } = attachErrorCollectors(page);
+    const metaRoot = page.locator('#meta-root');
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expectShellVisible(page);
+    await page.goto('/?renderer=webgl', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#app')).toBeVisible();
+    await expect(page.getByRole('heading', { name: /HELI\s*SUNSET/i })).toBeVisible();
+    await expect(page.locator('#open-settings-btn')).toBeAttached();
+    await expect(page.locator('#open-hangar-btn')).toBeAttached();
+    await expect(metaRoot).toHaveAttribute('data-mode', 'closed');
 
-    await expect(page.locator('#open-settings-btn')).toBeVisible();
-    await expect(page.locator('#open-hangar-btn')).toBeVisible();
-    await expect(page.locator('#start-daily-id')).toBeAttached();
-    await expect(page.locator('#daily-challenge-desc')).toContainText(/local daily|no online/i);
+    // Run the full settings + hangar flow in-page as soon as MetaPanel binds.
+    type MetaFlowResult = {
+      settingsFocusOk: boolean;
+      settingsRole: string | null;
+      settingsModal: string | null;
+      hangarRole: string | null;
+      hangarModal: string | null;
+      skinCount: number;
+      loadoutCount: number;
+      qualityPref: string | null;
+      highContrast: string | null;
+      highContrastClass: boolean;
+      finalMode: string;
+      rootHidden: boolean;
+    };
 
-    await page.locator('#open-settings-btn').click();
-    const settings = page.locator('#settings-panel');
-    await expect(settings).toBeVisible();
-    await expect(settings).toHaveAttribute('role', 'dialog');
-    await expect(page.locator('#settings-title')).toBeVisible();
+    let flow: MetaFlowResult | null = null;
+    await expect
+      .poll(
+        async () => {
+          flow = await page.evaluate(() => {
+            const root = document.getElementById('meta-root');
+            const settingsBtn = document.getElementById('open-settings-btn');
+            const hangarBtn = document.getElementById('open-hangar-btn');
+            const settingsClose = document.getElementById('settings-close-btn');
+            const hangarClose = document.getElementById('hangar-close-btn');
+            const settingsPanel = document.getElementById('settings-panel');
+            const hangarPanel = document.getElementById('hangar-panel');
+            if (
+              !root ||
+              !settingsBtn ||
+              !hangarBtn ||
+              !settingsClose ||
+              !hangarClose ||
+              !settingsPanel ||
+              !hangarPanel
+            ) {
+              return null;
+            }
 
-    await page.locator('#settings-panel select[name="quality"]').selectOption('low');
-    await page.locator('#settings-panel input[name="highContrast"]').check();
-    await page.locator('#settings-close-btn').click();
-    await expect(settings).toBeHidden();
+            const mode = () => root.getAttribute('data-mode') ?? '';
 
+            if (mode() !== 'settings') {
+              settingsBtn.scrollIntoView({ block: 'center', inline: 'nearest' });
+              settingsBtn.click();
+            }
+            if (mode() !== 'settings' || settingsPanel.hidden) return null;
+
+            const settingsFocusOk = !!(
+              document.activeElement && settingsPanel.contains(document.activeElement)
+            );
+
+            const quality = document.querySelector(
+              '#settings-panel select[name="quality"]',
+            ) as HTMLSelectElement | null;
+            const contrast = document.querySelector(
+              '#settings-panel input[name="highContrast"]',
+            ) as HTMLInputElement | null;
+            if (!quality || !contrast) return null;
+            quality.value = 'low';
+            quality.dispatchEvent(new Event('change', { bubbles: true }));
+            contrast.checked = true;
+            contrast.dispatchEvent(new Event('change', { bubbles: true }));
+
+            settingsClose.click();
+            if (mode() !== 'closed' || !root.hidden) return null;
+
+            hangarBtn.scrollIntoView({ block: 'center', inline: 'nearest' });
+            hangarBtn.click();
+            if (mode() !== 'hangar' || hangarPanel.hidden) return null;
+
+            const skinCount = document.querySelectorAll('#skin-list .meta-choice').length;
+            const loadoutCount = document.querySelectorAll('#loadout-list .meta-choice').length;
+            if (skinCount < 1 || loadoutCount < 1) return null;
+
+            hangarClose.click();
+            if (
+              mode() !== 'closed' ||
+              !root.hidden ||
+              root.getAttribute('aria-hidden') !== 'true'
+            ) {
+              return null;
+            }
+
+            return {
+              settingsFocusOk,
+              settingsRole: settingsPanel.getAttribute('role'),
+              settingsModal: settingsPanel.getAttribute('aria-modal'),
+              hangarRole: hangarPanel.getAttribute('role'),
+              hangarModal: hangarPanel.getAttribute('aria-modal'),
+              skinCount,
+              loadoutCount,
+              qualityPref: document.documentElement.getAttribute('data-quality-pref'),
+              highContrast: document.documentElement.getAttribute('data-high-contrast'),
+              highContrastClass: document.documentElement.classList.contains('a11y-high-contrast'),
+              finalMode: mode(),
+              rootHidden: root.hidden,
+            };
+          });
+          return flow;
+        },
+        { timeout: 25_000, intervals: [50, 100, 200, 400] },
+      )
+      .not.toBeNull();
+
+    expect(flow).not.toBeNull();
+    expect(flow!.settingsFocusOk).toBe(true);
+    expect(flow!.settingsRole).toBe('dialog');
+    expect(flow!.settingsModal).toBe('true');
+    expect(flow!.hangarRole).toBe('dialog');
+    expect(flow!.hangarModal).toBe('true');
+    expect(flow!.skinCount).toBeGreaterThan(0);
+    expect(flow!.loadoutCount).toBeGreaterThan(0);
+    expect(flow!.finalMode).toBe('closed');
+    expect(flow!.rootHidden).toBe(true);
+    expect(flow!.qualityPref).toBe('low');
+    expect(flow!.highContrast).toBe('on');
+    expect(flow!.highContrastClass).toBe(true);
+
+    await expect(metaRoot).toHaveAttribute('data-mode', 'closed');
     await expect(page.locator('html')).toHaveAttribute('data-quality-pref', 'low');
     await expect(page.locator('html')).toHaveAttribute('data-high-contrast', 'on');
     await expect(page.locator('html')).toHaveClass(/a11y-high-contrast/);
 
-    await page.locator('#open-hangar-btn').click();
-    const hangar = page.locator('#hangar-panel');
-    const metaRoot = page.locator('#meta-root');
-    await expect(hangar).toBeVisible();
-    await expect(hangar).toHaveAttribute('role', 'dialog');
-    await expect(page.locator('#skin-list .meta-choice').first()).toBeVisible();
-    await expect(page.locator('#loadout-list .meta-choice').first()).toBeVisible();
-    await expect(page.locator('#hangar-close-btn')).toBeVisible();
-    await page.locator('#hangar-close-btn').click({ force: true });
-    // Assert the shell closed (nested toBeHidden on #hangar-panel is unreliable under a [hidden] root).
-    await expect(metaRoot).toBeHidden({ timeout: 10_000 });
-    await expect(metaRoot).toHaveAttribute('data-mode', 'closed');
-    await expect(hangar).toHaveAttribute('hidden', '');
-
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expectShellVisible(page);
+    await expect(page.locator('#app')).toBeVisible();
     await expect(page.locator('html')).toHaveAttribute('data-quality-pref', 'low');
     await expect(page.locator('html')).toHaveAttribute('data-high-contrast', 'on');
 

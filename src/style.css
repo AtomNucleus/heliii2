@@ -712,6 +712,10 @@ body,
   padding: 2.35rem 2.5rem;
   max-width: 30rem;
   width: min(30rem, 100%);
+  /* Keep actions (Start / Hangar / Settings) reachable on short desktop viewports. */
+  max-height: calc(100dvh - 2rem - var(--safe-top) - var(--safe-bottom));
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid rgba(57, 255, 154, 0.42);
   background:
     linear-gradient(165deg, rgba(8, 26, 32, 0.94), rgba(14, 44, 50, 0.88));
