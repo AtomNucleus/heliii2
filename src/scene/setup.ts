@@ -219,7 +219,8 @@ export function createSceneSetupWithRenderer(
 ) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(COLORS.skyTop);
-  scene.fog = new THREE.FogExp2(COLORS.fog, 0.0011);
+  // Light haze — dense fog erased the Fruzer base into a grey smear
+  scene.fog = new THREE.FogExp2(COLORS.fog, 0.00072);
 
   const camera = new THREE.PerspectiveCamera(
     60,
@@ -275,7 +276,7 @@ export function createSceneSetupWithRenderer(
     focus: new THREE.Vector3(),
   };
 
-  const baseFogDensity = 0.0011;
+  const baseFogDensity = 0.00072;
   const fogColor = new THREE.Color(COLORS.fog);
   let skyMesh: THREE.Mesh | null = null;
   let sunDisc: THREE.Group | null = null;

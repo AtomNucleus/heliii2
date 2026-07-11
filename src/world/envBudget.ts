@@ -54,7 +54,8 @@ const BUDGETS: Record<EnvQualityTier, EnvBudget> = {
     smokeColumns: 2,
     birds: 4,
     animate: true,
-    fruzerUnderlay: 0.42,
+    // Keep Fruzer readable as the base island; overlay dresses, not replaces
+    fruzerUnderlay: 0.78,
   },
   medium: {
     tier: 'medium',
@@ -78,7 +79,7 @@ const BUDGETS: Record<EnvQualityTier, EnvBudget> = {
     smokeColumns: 3,
     birds: 8,
     animate: true,
-    fruzerUnderlay: 0.48,
+    fruzerUnderlay: 0.86,
   },
   high: {
     tier: 'high',
@@ -102,7 +103,7 @@ const BUDGETS: Record<EnvQualityTier, EnvBudget> = {
     smokeColumns: 4,
     birds: 12,
     animate: true,
-    fruzerUnderlay: 0.55,
+    fruzerUnderlay: 0.92,
   },
 };
 
