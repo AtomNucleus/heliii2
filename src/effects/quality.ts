@@ -48,8 +48,10 @@ const TIERS: Record<QualityTier, QualitySettings> = {
     pixelRatioCap: 1,
     shadowMapSize: 512,
     shadowsEnabled: false,
-    bloomEnabled: true,
-    bloomStrength: 0.1,
+    // Bloom allocates several full-screen render targets. Keep it out of the
+    // low-memory boot path; medium/high retain the authored effect.
+    bloomEnabled: false,
+    bloomStrength: 0,
     filmGrain: false,
     vignette: true,
     chromaticAberration: false,

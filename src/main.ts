@@ -37,6 +37,11 @@ import {
   type SkinId,
   type LoadoutId,
 } from './profile';
+import { withTimeout } from './utils/withTimeout';
+
+const PWA_INIT_TIMEOUT_MS = 5_000;
+const VISUAL_EFFECTS_TIMEOUT_MS = 15_000;
+const PHYSICS_INIT_TIMEOUT_MS = 8_000;
 
 type GamePhase = 'loading' | 'start' | 'playing' | 'paused' | 'complete' | 'failed';
 
@@ -147,6 +152,17 @@ function presentGraphicsFailure(err: unknown, stage: string): void {
   startBtn.disabled = false;
   startBtn.textContent = 'RETRY COMPATIBILITY MODE';
   startBtn.dataset.graphicsRetry = 'compatibility';
+}
+
+function presentStartupFailure(err: unknown, stage: string): void {
+  const reason = err instanceof Error ? err.message : String(err);
+  console.error(`[startup:${stage}]`, err);
+  appRoot?.setAttribute('data-startup-error-stage', stage);
+  appRoot?.setAttribute('data-startup-error-reason', reason);
+  setLoadingText('Startup failed. Tap retry to reload the game.');
+  startBtn.disabled = false;
+  startBtn.textContent = 'RETRY';
+  startBtn.dataset.startupRetry = 'reload';
 }
 
 /**
@@ -331,6 +347,11 @@ startBtn.addEventListener('click', () => {
   if (startBtn.dataset.graphicsRetry === 'compatibility') {
     audio.playUISelect();
     reloadIntoCompatibilityMode();
+    return;
+  }
+  if (startBtn.dataset.startupRetry === 'reload') {
+    audio.playUISelect();
+    window.location.reload();
     return;
   }
   if (phase === 'start') {
@@ -570,7 +591,11 @@ async function boot() {
       const tier = fx.quality.currentTier;
       const useRapier = shouldEnableRapierDebris(tier) && fx.quality.current.physicsDebris;
       const debrisPhysics = useRapier
-        ? await ensureSharedDebrisPhysics({ groundY: 0 }, tier)
+        ? await withTimeout(
+            ensureSharedDebrisPhysics({ groundY: 0 }, tier),
+            PHYSICS_INIT_TIMEOUT_MS,
+            'physics-init',
+          )
         : DebrisPhysicsWorld.createKinematic({ groundY: 0 }, tier);
       setSharedDebrisPhysics(debrisPhysics);
       console.info(
@@ -840,9 +865,7 @@ async function boot() {
     startBtn.textContent = 'START OPERATION';
     notifyPwaPhase();
   } catch (err) {
-    console.error(err);
-    setLoadingText('Failed to load map. Check console / refresh.');
-    startBtn.textContent = 'LOAD FAILED';
+    presentStartupFailure(err, 'boot');
   }
 }
 
@@ -861,11 +884,19 @@ async function main() {
   metaPanel.refresh();
 
   if (appRoot) {
-    pwa = await initPwa({
-      root: appRoot,
-      getMissionSafety: () =>
-        phase === 'playing' || phase === 'paused' ? 'active' : 'safe',
-    });
+    try {
+      pwa = await withTimeout(
+        initPwa({
+          root: appRoot,
+          getMissionSafety: () =>
+            phase === 'playing' || phase === 'paused' ? 'active' : 'safe',
+        }),
+        PWA_INIT_TIMEOUT_MS,
+        'pwa-init',
+      );
+    } catch (pwaErr) {
+      console.warn('[pwa] initialization skipped', pwaErr);
+    }
   }
 
   try {
@@ -877,7 +908,11 @@ async function main() {
     sunLight = sceneSetup.sunLight;
 
     try {
-      fx = await VisualEffects.create(sceneSetup);
+      fx = await withTimeout(
+        VisualEffects.create(sceneSetup),
+        VISUAL_EFFECTS_TIMEOUT_MS,
+        'visual-effects-init',
+      );
     } catch (fxErr) {
       if (
         sceneSetup.rendererInfo.backend === 'webgpu'

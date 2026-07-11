@@ -82,6 +82,13 @@ async function expectBootSettledWithoutBareLoadFailed(page: Page) {
     return 'compat-retry' as const;
   }
 
+  if (/^RETRY$/i.test(btnText)) {
+    await expect(page.locator('#app')).toHaveAttribute('data-startup-error-stage', /.+/);
+    await expect(loading).toContainText(/startup failed/i);
+    await expect(startBtn).toBeEnabled();
+    return 'startup-retry' as const;
+  }
+
   return 'ready-or-partial' as const;
 }
 

@@ -4,6 +4,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { COLORS, createSunsetSkyDome, createSunDisc } from '../scene/setup';
 import { createEnvironmentLayer, type EnvironmentLayer } from './environmentLayer';
 import { WorldCollision } from '../collision';
+import { withTimeout } from '../utils/withTimeout';
 
 /** Target play-area width (largest XZ extent after scale), in world units */
 export const MAP_TARGET_SIZE = 260;
@@ -16,6 +17,7 @@ export const HEIGHT_RAY_LIFT = 80;
 
 export const MAP_URL = './maps/fruzer-polygon.glb';
 export const DRACO_DECODER_PATH = './draco/';
+const MAP_DOWNLOAD_TIMEOUT_MS = 45_000;
 
 export interface WorldObjects {
   group: THREE.Group;
@@ -487,16 +489,26 @@ export async function loadMapWorld(
   const loader = new GLTFLoader();
   loader.setDRACOLoader(draco);
 
-  const gltf = await new Promise<Awaited<ReturnType<typeof loader.loadAsync>>>((resolve, reject) => {
-    loader.load(
-      MAP_URL,
-      resolve,
-      (ev) => {
-        if (ev.total > 0 && onProgress) onProgress(ev.loaded / ev.total);
-      },
-      reject,
+  let gltf: Awaited<ReturnType<typeof loader.loadAsync>>;
+  try {
+    gltf = await withTimeout(
+      new Promise<Awaited<ReturnType<typeof loader.loadAsync>>>((resolve, reject) => {
+        loader.load(
+          MAP_URL,
+          resolve,
+          (ev) => {
+            if (ev.total > 0 && onProgress) onProgress(ev.loaded / ev.total);
+          },
+          reject,
+        );
+      }),
+      MAP_DOWNLOAD_TIMEOUT_MS,
+      'map-download',
     );
-  });
+  } catch (err) {
+    draco.dispose();
+    throw err;
+  }
 
   const group = new THREE.Group();
   group.name = 'world';

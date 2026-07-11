@@ -13,6 +13,10 @@ import {
 import { setActiveRendererBackend } from './runtime';
 import type { GameRendererHandle, RendererInitInfo } from './types';
 import { webglContextFallbackLadder, type WebGLContextAttempt } from './webglFallback';
+import { withTimeout, withTimeoutFallback } from '../utils/withTimeout';
+
+const WEBGPU_PROBE_TIMEOUT_MS = 4_000;
+const WEBGPU_INIT_TIMEOUT_MS = 10_000;
 
 export interface CreateGameRendererOptions {
   canvas: HTMLCanvasElement;
@@ -88,8 +92,10 @@ function configureCommon(renderer: {
     type: number;
     autoUpdate?: boolean;
   };
-}): void {
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+}, pixelRatioCap: number): void {
+  // Apply a conservative cap before Three/composer allocate their first render
+  // targets. Adaptive quality can lower this further after startup.
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelRatioCap));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.48;
@@ -166,7 +172,7 @@ function createWebGLHandle(
     }
     try {
       const renderer = tryCreateWebGLRenderer(target, attempt);
-      configureCommon(renderer);
+      configureCommon(renderer, mobileStable ? 1 : 1.5);
       const info = baseInfo(preference, 'webgl', fellBack, reason, attempt.id);
       setActiveRendererBackend('webgl');
       console.info(`[renderer] WebGL context ok attempt=${attempt.id} reason=${reason}`);
@@ -234,7 +240,12 @@ export async function createGameRenderer(
   }
 
   // Desktop / explicit WebGPU: probe adapter only, then init Three's renderer.
-  const webgpuReady = await probeWebGPU(mobileStable ? 'default' : 'high-performance');
+  const webgpuReady = await withTimeoutFallback(
+    probeWebGPU(mobileStable ? 'default' : 'high-performance'),
+    WEBGPU_PROBE_TIMEOUT_MS,
+    'webgpu-probe',
+    false,
+  );
   if (!webgpuReady) {
     return createWebGLHandle(
       canvas,
@@ -253,11 +264,11 @@ export async function createGameRenderer(
       powerPreference: mobileStable ? undefined : 'high-performance',
       stencil: false,
     });
-    await renderer.init();
+    await withTimeout(renderer.init(), WEBGPU_INIT_TIMEOUT_MS, 'webgpu-renderer-init');
 
     const backend = renderer.backend as { isWebGPUBackend?: boolean };
     if (backend?.isWebGPUBackend === true) {
-      configureCommon(renderer);
+      configureCommon(renderer, mobileStable ? 1 : 1.5);
       const info = baseInfo(preference, 'webgpu', false, 'webgpu-init-ok');
       setActiveRendererBackend('webgpu');
       return {
