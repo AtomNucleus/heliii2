@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { COLORS, createSunsetSkyDome, createSunDisc } from '../scene/setup';
 import { createEnvironmentLayer, type EnvironmentLayer } from './environmentLayer';
+import { applyFruzerMaterials } from './fruzerMaterials';
 import { WorldCollision } from '../collision';
 import { withTimeout } from '../utils/withTimeout';
 
@@ -422,10 +423,10 @@ export function findOpenSpawn(
   }
 
   const sortedY = allY.slice().sort((a, b) => a - b);
-  // On this map the outdoor yard is the lower plateau of first-hits;
-  // higher samples are rooftops. Keep spawn in that lower band.
-  const yOutdoorMax = percentile(sortedY, 0.22);
-  const yFloor = percentile(sortedY, 0.05);
+  // Outdoor yard is the lower plateau of first-hits; rooftops dominate the
+  // upper percentiles. Keep spawn in that lower band — never mid roofs.
+  const yOutdoorMax = percentile(sortedY, 0.12);
+  const yFloor = percentile(sortedY, 0.03);
 
   type Scored = { ix: number; iz: number; y: number; score: number };
   let best: Scored | null = null;
@@ -462,7 +463,9 @@ export function findOpenSpawn(
 
       // Prefer the lower outdoor band (true yards), not mid roofs that sneak in
       const bandSpan = Math.max(0.5, yOutdoorMax - yFloor);
-      const heightScore = 6 * (1 - THREE.MathUtils.clamp((y - yFloor) / bandSpan, 0, 1));
+      const heightScore = 8 * (1 - THREE.MathUtils.clamp((y - yFloor) / bandSpan, 0, 1));
+      // Hard bias toward absolute low ground so we don't hover on hangar roofs
+      const absoluteLowScore = -0.035 * Math.max(0, y - yFloor);
 
       const flatScore = 2.5 / (1 + localVariance);
       const openYardScore = -1.2 * tallNeighbors;
@@ -491,7 +494,13 @@ export function findOpenSpawn(
       }
 
       const score =
-        heightScore + flatScore + clearScore + centerScore + openYardScore + matScore;
+        heightScore +
+        absoluteLowScore +
+        flatScore +
+        clearScore +
+        centerScore +
+        openYardScore +
+        matScore;
       if (!best || score > best.score) {
         best = { ix, iz, y, score };
       }
@@ -612,50 +621,15 @@ export async function loadMapWorld(
 
   await beginStage('Preparing map surfaces…', 'map-materials', 0.68);
 
+  // Collapse scrambled atlas stretches into flat Chicken Gun swatches while
+  // keeping legitimate tiny-swatch UVs on nearest-filtered textures.
+  const matStats = applyFruzerMaterials(mapScaled);
+  console.info('[map] materials', matStats);
+
   const colliders: THREE.Mesh[] = [];
   mapScaled.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
-    // Flat unlit look matches Sketchfab / Chicken Gun; avoid PBR muddying
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    if (mesh.material) {
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      const next: THREE.Material[] = [];
-      for (const m of mats) {
-        const src = m as THREE.MeshStandardMaterial;
-        const map = src.map;
-        if (map) {
-          map.colorSpace = THREE.SRGBColorSpace;
-          map.channel = 0;
-          // Palette atlases sample tiny color swatches — bilinear blur
-          // turns them into muddy brown. Keep crisp nearest filtering.
-          map.magFilter = THREE.NearestFilter;
-          map.minFilter = THREE.NearestFilter;
-          map.generateMipmaps = false;
-          map.needsUpdate = true;
-        }
-        const name = src.name || '';
-        const isFence = /fence/i.test(name);
-        const isWater = /water/i.test(name);
-        const basic = new THREE.MeshBasicMaterial({
-          map: map ?? null,
-          color: src.color?.clone?.() ?? new THREE.Color(0xffffff),
-          transparent: src.transparent || isWater,
-          opacity: src.opacity ?? 1,
-          alphaTest: src.alphaTest > 0 ? src.alphaTest : isFence ? 0.5 : 0,
-          side: isFence || isWater ? THREE.DoubleSide : (src.side ?? THREE.FrontSide),
-          depthWrite: isWater ? false : src.depthWrite !== false,
-        });
-        basic.name = name;
-        if (isWater) {
-          basic.opacity = Math.min(basic.opacity, 0.85);
-        }
-        src.dispose?.();
-        next.push(basic);
-      }
-      mesh.material = next.length === 1 ? next[0] : next;
-    }
     colliders.push(mesh);
   });
 

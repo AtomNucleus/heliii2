@@ -534,10 +534,12 @@ body,
 .hud-mission {
   position: absolute;
   left: 50%;
-  bottom: calc(1.35rem + var(--safe-bottom) + var(--touch-chrome-bottom));
-  width: min(22rem, calc(100vw - 2rem - var(--touch-chrome-right)));
+  /* Keep the objective strip clear of the craft / touch chrome */
+  bottom: calc(1.1rem + var(--safe-bottom) + var(--touch-chrome-bottom));
+  width: min(20rem, calc(100vw - 2.4rem - var(--touch-chrome-right)));
   transform: translateX(-50%);
   text-align: center;
+  padding: 0.55rem 0.8rem;
   transition: opacity 0.25s ease, transform 0.3s var(--ease-snap);
 }
 
@@ -557,9 +559,9 @@ body,
 
 .hud-mission-tag {
   display: inline-block;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.15rem;
   font-family: 'Orbitron', sans-serif;
-  font-size: 0.52rem;
+  font-size: 0.5rem;
   letter-spacing: 0.28em;
   color: var(--orange-sun);
 }
@@ -567,7 +569,7 @@ body,
 .hud-mission-title {
   display: block;
   font-family: 'Orbitron', sans-serif;
-  font-size: 0.95rem;
+  font-size: 0.86rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   color: var(--neon-bright);
@@ -576,8 +578,8 @@ body,
 
 .hud-mission-detail {
   display: block;
-  margin: 0.2rem 0 0.55rem;
-  font-size: 0.92rem;
+  margin: 0.12rem 0 0.4rem;
+  font-size: 0.82rem;
   letter-spacing: 0.04em;
   color: rgba(180, 255, 220, 0.75);
 }
@@ -610,15 +612,16 @@ body,
 .hud-toast {
   position: absolute;
   left: 50%;
-  top: calc(18% + var(--touch-chrome-top) * 0.35);
+  /* Sit under brand, above reticle — never over mission strip */
+  top: calc(12% + var(--touch-chrome-top) * 0.25);
   min-height: 1.5rem;
-  max-width: min(28rem, calc(100vw - 2rem - var(--touch-chrome-right)));
+  max-width: min(26rem, calc(100vw - 2.5rem - var(--touch-chrome-right)));
   padding: 0 0.75rem;
   transform: translateX(-50%);
   font-family: 'Orbitron', sans-serif;
-  font-size: clamp(0.85rem, 2.5vw, 1.15rem);
+  font-size: clamp(0.78rem, 2.2vw, 1.05rem);
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   color: var(--orange-glow);
   text-shadow: 0 0 18px rgba(255, 140, 58, 0.65);
   text-align: center;
@@ -1369,18 +1372,18 @@ html.a11y-captions-off #hud-toast.is-radio {
   }
 
   .hud-mission {
-    bottom: calc(0.85rem + var(--safe-bottom) + var(--touch-chrome-bottom));
-    width: min(18rem, calc(100vw - 1.2rem - var(--touch-chrome-right)));
-    padding: 0.55rem 0.7rem;
+    bottom: calc(0.75rem + var(--safe-bottom) + var(--touch-chrome-bottom));
+    width: min(16.5rem, calc(100vw - 1.5rem - var(--touch-chrome-right)));
+    padding: 0.45rem 0.6rem;
   }
 
   .hud-mission-title {
-    font-size: 0.78rem;
+    font-size: 0.72rem;
   }
 
   .hud-mission-detail {
-    font-size: 0.8rem;
-    margin-bottom: 0.4rem;
+    font-size: 0.74rem;
+    margin-bottom: 0.3rem;
   }
 
   .overlay-panel {
