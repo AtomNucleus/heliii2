@@ -27,7 +27,7 @@ export class SmokeFireSystem {
   private readonly coolColor = new THREE.Color(0x4a4038);
 
   constructor(parent: THREE.Object3D, budget: CombatFxBudget) {
-    this.group.name = 'vfx-smoke-fire';
+    this.group.name = 'combat-smoke-fire';
     parent.add(this.group);
     this.budget = budget;
     this.geo = new THREE.PlaneGeometry(1, 1);
@@ -113,6 +113,38 @@ export class SmokeFireSystem {
       this.group.add(slot.mesh);
       this.active.push(slot);
     }
+  }
+
+  /** Single soft puff — used by continuous hull damage. */
+  spawnPuff(position: THREE.Vector3, hot: boolean, scale = 0.55) {
+    if (!this.budget.enableSmoke) return;
+    const slot = this.pool.tryAcquire(this.budget.maxSmoke, this.active.length);
+    if (!slot) return;
+
+    slot.isFire = hot;
+    const mat = slot.mesh.material as THREE.MeshBasicMaterial;
+    mat.color.setHex(hot ? COLORS.orangeHot : 0x5a5048);
+    mat.blending = hot ? THREE.AdditiveBlending : THREE.NormalBlending;
+    mat.opacity = hot ? 0.65 : 0.38;
+
+    slot.mesh.position.copy(position);
+    slot.mesh.position.x += (Math.random() - 0.5) * 0.5;
+    slot.mesh.position.y += 0.1 + Math.random() * 0.3;
+    slot.mesh.position.z += (Math.random() - 0.5) * 0.5;
+    slot.mesh.scale.setScalar((hot ? 0.7 : 1.0) * scale * this.budget.scale);
+    slot.grow = hot ? 1.6 : 2.4;
+    slot.spin = (Math.random() - 0.5) * 1.2;
+    slot.velocity.set(
+      (Math.random() - 0.5) * 0.8,
+      (hot ? 2.2 : 1.6) + Math.random() * 1.2,
+      (Math.random() - 0.5) * 0.8,
+    );
+    slot.life = hot ? 0.55 : 1.2;
+    slot.maxLife = slot.life;
+    slot.active = true;
+    slot.mesh.visible = true;
+    this.group.add(slot.mesh);
+    this.active.push(slot);
   }
 
   update(dt: number) {

@@ -23,7 +23,7 @@ export class DecalSystem {
   private getGroundHeight: ((x: number, z: number) => number) | null = null;
 
   constructor(parent: THREE.Object3D, budget: CombatFxBudget) {
-    this.group.name = 'vfx-decals';
+    this.group.name = 'combat-decals';
     parent.add(this.group);
     this.budget = budget;
     this.geo = new THREE.CircleGeometry(1, 20);
@@ -62,9 +62,6 @@ export class DecalSystem {
     return { mesh, life: 0, maxLife: 1, active: false, grow: 1 };
   }
 
-  /**
-   * Spawn a scorch if the blast is near ground. Returns false if skipped.
-   */
   spawn(position: THREE.Vector3, scale = 1, color = 0x2a1810): boolean {
     if (!this.budget.enableDecals) return false;
 
@@ -97,7 +94,6 @@ export class DecalSystem {
     this.group.add(slot.mesh);
     this.active.push(slot);
 
-    // Hot inner glow disc
     if (this.active.length < this.budget.maxDecals) {
       const glow = this.pool.tryAcquire(this.budget.maxDecals, this.active.length);
       if (glow) {
@@ -123,7 +119,6 @@ export class DecalSystem {
       const slot = this.active[i];
       slot.life -= dt;
       const t = 1 - Math.max(0, slot.life / slot.maxLife);
-      // Quick expand then hold
       const expand = Math.min(1, t * 4);
       const s = THREE.MathUtils.lerp(0.35, 1, expand) * slot.grow;
       slot.mesh.scale.setScalar(s);

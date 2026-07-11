@@ -25,7 +25,7 @@ export class SparkSystem {
   private readonly tmpDir = new THREE.Vector3();
 
   constructor(parent: THREE.Object3D, budget: CombatFxBudget) {
-    this.group.name = 'vfx-sparks';
+    this.group.name = 'combat-sparks';
     parent.add(this.group);
     this.budget = budget;
     this.geo = new THREE.CylinderGeometry(0.025, 0.01, 1, 4);

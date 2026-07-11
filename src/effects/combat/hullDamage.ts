@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { COLORS } from '../../scene/setup';
 import type { CombatFxBudget } from './budgets';
+import type { SmokeFireSystem } from './smokeFire';
+import type { EmberSystem } from './embers';
+import type { SparkSystem } from './sparks';
 import { SlotPool } from './pool';
 
 interface PulseSlot {
@@ -11,19 +14,32 @@ interface PulseSlot {
 }
 
 /**
- * Player hull damage feedback — radial pulse + ember burst cue.
+ * Continuous helicopter hull damage — smoke / fire / embers by health ratio,
+ * plus sting pulses on hit.
  */
-export class DamageFeedbackSystem {
+export class HullDamageSystem {
   readonly group = new THREE.Group();
   private pulses: PulseSlot[] = [];
   private readonly pool: SlotPool<PulseSlot>;
   private readonly geo: THREE.RingGeometry;
+  private budget: CombatFxBudget;
+  private healthRatio = 1;
   private intensity = 0;
+  private emitAcc = 0;
+  private readonly offset = new THREE.Vector3();
+  private readonly emitPos = new THREE.Vector3();
   private readonly overlayColor = new THREE.Color(COLORS.orangeHot);
 
-  constructor(parent: THREE.Object3D, _budget: CombatFxBudget) {
-    this.group.name = 'vfx-damage-feedback';
+  constructor(
+    parent: THREE.Object3D,
+    budget: CombatFxBudget,
+    private readonly smoke: SmokeFireSystem,
+    private readonly embers: EmberSystem,
+    private readonly sparks: SparkSystem,
+  ) {
+    this.group.name = 'combat-hull-damage';
     parent.add(this.group);
+    this.budget = budget;
     this.geo = new THREE.RingGeometry(0.4, 0.85, 24);
 
     this.pool = new SlotPool(
@@ -37,13 +53,16 @@ export class DamageFeedbackSystem {
     );
   }
 
-  applyBudget(_budget: CombatFxBudget) {
-    // Intensity scaling reserved for future tier knobs
+  applyBudget(budget: CombatFxBudget) {
+    this.budget = budget;
   }
 
-  /** Current 0..1 damage sting for HUD / post hooks. */
   getIntensity(): number {
     return this.intensity;
+  }
+
+  setHealthRatio(ratio: number) {
+    this.healthRatio = THREE.MathUtils.clamp(ratio, 0, 1);
   }
 
   private createPulse(): PulseSlot {
@@ -83,11 +102,17 @@ export class DamageFeedbackSystem {
       this.group.add(slot.mesh);
       this.pulses.push(slot);
     }
+
+    this.sparks.spawn(position, COLORS.orangeHot, 0.55 + sting * 0.7);
+    if (amount > 8) {
+      this.smoke.spawnPuff(position, true, 0.45 + sting * 0.35);
+    }
     return sting;
   }
 
   update(dt: number, followPos?: THREE.Vector3) {
     this.intensity = Math.max(0, this.intensity - dt * 1.6);
+
     for (let i = this.pulses.length - 1; i >= 0; i--) {
       const slot = this.pulses[i];
       slot.life -= dt;
@@ -103,12 +128,41 @@ export class DamageFeedbackSystem {
         this.pool.release(slot);
       }
     }
+
+    if (!this.budget.enableHullDamage || !followPos) return;
+    if (this.healthRatio >= 0.72) return;
+
+    // Continuous leak: smoke below 72%, fire below 40%, embers below 28%
+    const damage = 1 - this.healthRatio;
+    const interval = THREE.MathUtils.lerp(0.55, 0.12, Math.min(1, damage / 0.85));
+    this.emitAcc += dt;
+    if (this.emitAcc < interval) return;
+    this.emitAcc = 0;
+
+    this.offset.set(
+      (Math.random() - 0.5) * 1.4,
+      -0.2 + Math.random() * 0.6,
+      (Math.random() - 0.5) * 1.2,
+    );
+    this.emitPos.copy(followPos).add(this.offset);
+
+    const hot = this.healthRatio < 0.4;
+    this.smoke.spawnPuff(this.emitPos, hot, 0.45 + damage * 0.55);
+
+    if (this.healthRatio < 0.28 && Math.random() < 0.45) {
+      this.embers.spawn(this.emitPos, 0.45 + damage * 0.4, COLORS.orangeGlow);
+    }
+    if (this.healthRatio < 0.2 && Math.random() < 0.35) {
+      this.sparks.spawn(this.emitPos, COLORS.orangeHot, 0.35);
+    }
   }
 
   clear() {
     for (const slot of this.pulses) this.pool.release(slot);
     this.pulses.length = 0;
     this.intensity = 0;
+    this.emitAcc = 0;
+    this.healthRatio = 1;
   }
 
   dispose() {

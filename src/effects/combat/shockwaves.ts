@@ -23,7 +23,7 @@ export class ShockwaveSystem {
   private readonly geo: THREE.RingGeometry;
 
   constructor(parent: THREE.Object3D, budget: CombatFxBudget) {
-    this.group.name = 'vfx-shockwaves';
+    this.group.name = 'combat-shockwaves';
     parent.add(this.group);
     this.budget = budget;
     this.geo = new THREE.RingGeometry(0.25, 0.55, 32);
@@ -94,7 +94,6 @@ export class ShockwaveSystem {
     this.group.add(slot.mesh);
     this.active.push(slot);
 
-    // Secondary softer ring on larger blasts
     if (scale > 1.2 && this.active.length < this.budget.maxWaves) {
       const delayed = this.pool.tryAcquire(this.budget.maxWaves, this.active.length);
       if (delayed) {

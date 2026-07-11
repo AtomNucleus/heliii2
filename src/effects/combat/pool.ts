@@ -38,7 +38,7 @@ export class SlotPool<T> {
     this.free.push(item);
   }
 
-  /** Soft-cap: if over max, still acquire but callers should prefer skipping. */
+  /** Soft-cap: if over max and no free slots, skip spawn. */
   tryAcquire(maxActive: number, activeCount: number): T | null {
     if (activeCount >= maxActive && this.free.length === 0) return null;
     return this.acquire();

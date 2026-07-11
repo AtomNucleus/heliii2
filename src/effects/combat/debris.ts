@@ -10,7 +10,6 @@ interface DebrisSlot {
   life: number;
   maxLife: number;
   active: boolean;
-  spin: THREE.Euler;
 }
 
 const DEBRIS_COLORS = [0x4a5560, 0x3a3030, 0x5a4030, 0x2a3238, COLORS.orangeHot];
@@ -27,7 +26,7 @@ export class DebrisSystem {
   private readonly gravity = 22;
 
   constructor(parent: THREE.Object3D, budget: CombatFxBudget) {
-    this.group.name = 'vfx-debris';
+    this.group.name = 'combat-debris';
     parent.add(this.group);
     this.budget = budget;
     this.sharedGeos = [
@@ -74,7 +73,6 @@ export class DebrisSystem {
       life: 0,
       maxLife: 1,
       active: false,
-      spin: new THREE.Euler(),
     };
   }
 

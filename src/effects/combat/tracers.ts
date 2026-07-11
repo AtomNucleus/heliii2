@@ -35,7 +35,7 @@ export class TracerSystem {
   private readonly tmp = new THREE.Vector3();
 
   constructor(parent: THREE.Object3D, budget: CombatFxBudget) {
-    this.group.name = 'vfx-tracers';
+    this.group.name = 'combat-tracers';
     parent.add(this.group);
     this.budget = budget;
     this.tracerGeo = new THREE.CylinderGeometry(0.05, 0.14, 1, 5);

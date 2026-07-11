@@ -14,7 +14,7 @@ interface BurstSlot {
 }
 
 /**
- * Pooled additive particle bursts — core of explosions / muzzle / hits.
+ * Pooled additive particle bursts — layered explosion cores / muzzle / hits.
  */
 export class BurstSystem {
   readonly group = new THREE.Group();
@@ -24,7 +24,7 @@ export class BurstSystem {
   private readonly maxParticles: number;
 
   constructor(parent: THREE.Object3D, budget: CombatFxBudget, maxParticles = 48) {
-    this.group.name = 'vfx-bursts';
+    this.group.name = 'combat-bursts';
     parent.add(this.group);
     this.budget = budget;
     this.maxParticles = maxParticles;

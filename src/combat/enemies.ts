@@ -1099,7 +1099,7 @@ export class EnemySystem {
             overkill: before < p.damage * 0.5,
           });
         } else {
-          this.effects.spawnHitSpark(p.mesh.position.clone());
+          this.effects.spawnImpact(p.mesh.position.clone(), 'metal', 0.9);
           results.push({ enemy, destroyed: false, points: 0, overkill: false });
         }
         break;

@@ -214,7 +214,11 @@ export class CombatMission {
     yaw: number,
     heliVelocity?: THREE.Vector3,
   ): MissionOutcome {
-    if (this.outcome !== 'playing') return this.outcome;
+    if (this.outcome !== 'playing') {
+      // Keep finale / residual FX ticking after win/lose
+      this.effects.update(dt);
+      return this.outcome;
+    }
 
     this.elapsed += dt;
     this.timeSinceDamage += dt;
@@ -223,6 +227,7 @@ export class CombatMission {
     this.scoring.update(dt);
     this.heliPos.copy(heli.position);
     this.effects.setFollowTarget(this.heliPos);
+    this.effects.setHullHealthRatio(this.health.ratio);
     this.effects.update(dt);
 
     const snap = this.scoring.getSnapshot();
@@ -275,6 +280,7 @@ export class CombatMission {
 
     const homing = this.enemies.getHomingTargets();
     this.weapons.update(dt, homing);
+    this.effects.syncProjectileTrails(this.weapons.activeProjectiles);
 
     if (this.damageFlash > 0) {
       this.damageFlash = Math.max(0, this.damageFlash - dt * 1.8);
@@ -340,7 +346,7 @@ export class CombatMission {
       const dist = p.mesh.position.distanceTo(heli.position);
       if (dist < 2.5 + p.radius) {
         const applied = this.health.takeDamage(p.damage, 'aa-fire');
-        this.effects.spawnHitSpark(p.mesh.position.clone());
+        this.effects.spawnImpact(p.mesh.position.clone(), 'metal', 1.1);
         this.weapons.despawn(p);
         if (applied > 0) this.damageFlash = 1;
       } else if (
@@ -389,6 +395,10 @@ export class CombatMission {
 
   private finish(outcome: 'won' | 'lost') {
     this.outcome = outcome;
+    this.effects.playFinale(
+      outcome === 'won' ? 'victory' : 'defeat',
+      this.heliPos,
+    );
     const snap: ScoreSnapshot = this.scoring.getSnapshot();
     let timeBonus = 0;
     let healthBonus = 0;

@@ -196,6 +196,10 @@ function animate() {
   if (phase === 'playing') {
     const state = controller.getState();
     const outcome = mission.update(dt, time, heli, state.yaw, state.velocity);
+    const impulse = mission.effects.consumeCameraImpulse(dt);
+    if (impulse.trauma > 0.02) {
+      controller.addCameraShake(impulse.trauma);
+    }
     syncHud();
     audio.updateFlight({
       speed,
@@ -206,6 +210,13 @@ function animate() {
 
     if (outcome !== 'playing' && mission.summary) {
       finishMission(mission.summary);
+    }
+  } else if (phase === 'complete' || phase === 'failed') {
+    // Drain residual combat FX / finale after mission ends
+    mission.update(dt, time, heli, 0);
+    const impulse = mission.effects.consumeCameraImpulse(dt);
+    if (impulse.trauma > 0.02) {
+      controller.addCameraShake(impulse.trauma);
     }
   }
 
