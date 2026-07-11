@@ -324,6 +324,11 @@ export class HUD {
     this.toastTimer = duration;
   }
 
+  /** Radio-style narrative line (COMMAND › …). Uses toast channel. */
+  showRadio(callsign: string, text: string, hold = 3.2) {
+    this.toast(`${callsign} › ${text}`, Math.max(1.6, hold * 0.85));
+  }
+
   tick(dt: number) {
     if (this.toastTimer > 0) {
       this.toastTimer -= dt;
@@ -415,6 +420,57 @@ export class HUD {
             }`,
       progress,
       countLabel: `${state.targetsLeft} LEFT`,
+      hidden: false,
+    });
+  }
+
+  /**
+   * Phased Operation SUNSET HUD — prefers explicit phase fields when present.
+   */
+  updateStrike(state: {
+    time: number;
+    speed: number;
+    altitude: number;
+    health: number;
+    healthMax: number;
+    score: number;
+    combo: number;
+    multiplier: number;
+    rings: number;
+    ringsTotal: number;
+    weaponReady: boolean;
+    phase: {
+      code: string;
+      title: string;
+      verb: string;
+      detail: string;
+      progress: number;
+      countLabel: string;
+      phaseIndex: number;
+      phaseTotal: number;
+    };
+    lives?: number;
+  }) {
+    if (!this.combatHudEnabled) this.enableCombatHud(true);
+    this.totalRings = state.ringsTotal;
+    this.timeEl.textContent = formatTime(state.time);
+    this.speedEl.textContent = `${Math.round(state.speed)}`;
+    this.altEl.textContent = `${Math.round(state.altitude)}`;
+    this.ringsEl.textContent = `${state.rings}/${state.ringsTotal}`;
+
+    this.setHealth(state.health, state.healthMax);
+    this.setScore(state.score);
+    this.setCombo(state.combo, state.multiplier);
+    this.setWeaponReady(state.weaponReady);
+
+    const lives =
+      state.lives != null ? ` · ${state.lives} hull${state.lives === 1 ? '' : 's'}` : '';
+    this.setMission({
+      tag: `OP · SUNSET · ${state.phase.code}`,
+      title: state.phase.verb,
+      detail: `${state.phase.detail}${lives}`,
+      progress: state.phase.progress,
+      countLabel: state.phase.countLabel,
       hidden: false,
     });
   }

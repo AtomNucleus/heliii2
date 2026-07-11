@@ -70,6 +70,11 @@ export class HealthSystem {
     this.current = Math.min(this.max, this.current + amount);
   }
 
+  /** Brief post-respawn / checkpoint invulnerability. */
+  grantInvulnerability(seconds = 1.5) {
+    this.invulnTimer = Math.max(this.invulnTimer, seconds);
+  }
+
   reset() {
     this.current = this.max;
     this.invulnTimer = 0;

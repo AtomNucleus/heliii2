@@ -9,7 +9,7 @@ import { HUD } from './hud/hud';
 import { MobileControls } from './hud/mobileControls';
 import { VisualEffects } from './effects/visualEffects';
 import { getGameAudio } from './audio';
-import { CombatMission, type MissionEndSummary } from './combat';
+import { StrikeMission, formatEndSubtitle, type StrikeEndSummary } from './mission';
 
 type GamePhase = 'loading' | 'start' | 'playing' | 'complete' | 'failed';
 
@@ -28,7 +28,7 @@ const audio = getGameAudio();
 let world: WorldObjects;
 let controller: HelicopterController;
 let checkpoints: CheckpointSystem;
-let mission: CombatMission;
+let mission: StrikeMission;
 let hud: HUD;
 let heli: THREE.Group;
 let mobileControls: MobileControls;
@@ -47,7 +47,7 @@ function setLoadingText(msg: string) {
 
 function syncHud() {
   const state = mission.getHudState();
-  hud.updateCombat({
+  hud.updateStrike({
     time: state.time,
     speed: controller.getSpeed(),
     altitude: controller.getAltitude(),
@@ -56,11 +56,11 @@ function syncHud() {
     score: state.score,
     combo: state.combo,
     multiplier: state.multiplier,
-    targetsLeft: state.targetsLeft,
-    targetsTotal: state.targetsTotal,
     rings: state.rings,
     ringsTotal: state.ringsTotal,
     weaponReady: state.weaponReady,
+    phase: state.phase,
+    lives: state.lives,
   });
   hud.setCrosshairState(state.aimLocked ? 'lock' : 'idle');
 }
@@ -80,7 +80,7 @@ function startGame() {
   hud.enableCombatHud(true);
   hud.show();
   syncHud();
-  hud.toast('STRIKE RUN · DESTROY THE DEPOTS', 2.2);
+  hud.toast('OPERATION SUNSET · INGRESS', 2.2);
   mobileControls.show();
   void audio.resume();
   audio.setMusicIntensity('patrol');
@@ -89,7 +89,7 @@ function startGame() {
   clock.start();
 }
 
-function finishMission(summary: MissionEndSummary) {
+function finishMission(summary: StrikeEndSummary) {
   const won = summary.outcome === 'won';
   phase = won ? 'complete' : 'failed';
   controller.enabled = false;
@@ -98,7 +98,7 @@ function finishMission(summary: MissionEndSummary) {
   audio.handleEvent({ type: won ? 'mission-complete' : 'mission-failed' });
   hud.showComplete({
     title: won ? 'MISSION COMPLETE' : 'HULL DESTROYED',
-    subtitle: won ? 'Fruzer strike successful' : 'Ejected over hostile territory',
+    subtitle: formatEndSubtitle(summary),
     score: summary.score,
     time: summary.time,
     kills: summary.kills,
@@ -350,7 +350,7 @@ async function boot() {
       10,
     );
     checkpoints = new CheckpointSystem(scene, ringLayout);
-    mission = new CombatMission(
+    mission = new StrikeMission(
       scene,
       {
         getGroundHeight: world.getGroundHeight,
@@ -364,6 +364,11 @@ async function boot() {
     mission.setEffectsCamera(camera);
     mission.applyQuality(fx.quality.current);
     fx.quality.onChange((q) => mission.applyQuality(q));
+    mission.onRespawn = (pos) => {
+      controller.reset(pos);
+      controller.enabled = true;
+      fx.resetTrail();
+    };
     hud = new HUD(checkpoints.total);
     hud.enableCombatHud(true);
     hud.bindMuteHandler((muted) => audio.setMuted(muted));
@@ -409,7 +414,7 @@ async function boot() {
           hud.setCrosshairState('hit', 260);
           const kp = event.enemy.position;
           if (event.primary) {
-            hud.toast(`DEPOT DOWN · +${event.points}`, 1.5);
+            hud.toast(`TARGET DOWN · +${event.points}`, 1.5);
           }
           audio.handleEvent({
             type: 'kill',
@@ -444,6 +449,21 @@ async function boot() {
         case 'toast':
           hud.toast(event.message);
           audio.handleEvent({ type: 'toast', message: event.message });
+          break;
+        case 'radio':
+          hud.showRadio(event.callsign, event.text, event.hold);
+          break;
+        case 'phase':
+          // StrikeMission already toasts phase code/title
+          break;
+        case 'checkpoint':
+          hud.toast(`CHECKPOINT · ${event.label}`, 1.4);
+          break;
+        case 'setpiece':
+          hud.toast(`SET-PIECE · ${event.name.replace(/_/g, ' ')}`, 1.6);
+          break;
+        case 'wave':
+          hud.toast(`WAVE ${event.wave}/${event.total}`, 1.4);
           break;
       }
     });
@@ -525,7 +545,7 @@ async function boot() {
     phase = 'start';
     setLoadingText('');
     startBtn.disabled = false;
-    startBtn.textContent = 'START STRIKE';
+    startBtn.textContent = 'START OPERATION';
   } catch (err) {
     console.error(err);
     setLoadingText('Failed to load map. Check console / refresh.');

@@ -92,6 +92,10 @@ export interface Enemy {
   interceptBias: number;
   flankBias: number;
   formationPull: number;
+  /** Optional mission tag (convoy, bunker, wave, etc.) */
+  tag: string | null;
+  /** Optional linear patrol velocity (XZ units/sec) */
+  velocity: THREE.Vector3 | null;
 }
 
 export interface EnemyHitResult {
@@ -401,6 +405,27 @@ export class EnemySystem {
 
   get aliveThreats(): number {
     return this.enemies.filter((e) => e.alive && !e.primary).length;
+  }
+
+  /** Alive enemies matching an optional tag filter. */
+  countAlive(filter?: { kind?: EnemyKind; primary?: boolean; tag?: string }): number {
+    return this.enemies.filter((e) => {
+      if (!e.alive) return false;
+      if (filter?.kind && e.kind !== filter.kind) return false;
+      if (filter?.primary != null && e.primary !== filter.primary) return false;
+      if (filter?.tag && e.tag !== filter.tag) return false;
+      return true;
+    }).length;
+  }
+
+  getAlive(filter?: { kind?: EnemyKind; primary?: boolean; tag?: string }): Enemy[] {
+    return this.enemies.filter((e) => {
+      if (!e.alive) return false;
+      if (filter?.kind && e.kind !== filter.kind) return false;
+      if (filter?.primary != null && e.primary !== filter.primary) return false;
+      if (filter?.tag && e.tag !== filter.tag) return false;
+      return true;
+    });
   }
 
   /** World positions of alive enemies (for rocket homing). */
@@ -721,6 +746,60 @@ export class EnemySystem {
     });
   }
 
+  /** Public spawn used by authored mission waves. */
+  spawnEnemy(
+    kind: EnemyKind,
+    position: THREE.Vector3,
+    opts: {
+      primary?: boolean;
+      health?: number;
+      scoreValue?: number;
+      fireCooldown?: number;
+      orbitCenter?: THREE.Vector3;
+      orbitRadius?: number;
+      orbitHeight?: number;
+      orbitAngle?: number;
+      tag?: string;
+      velocity?: THREE.Vector3;
+      scale?: number;
+    } = {},
+  ): Enemy {
+    const defaults =
+      kind === 'depot'
+        ? { health: 95, scoreValue: 550, fireCooldown: 99, primary: true }
+        : kind === 'turret'
+          ? { health: 55, scoreValue: 320, fireCooldown: 1.35, primary: false }
+          : { health: 42, scoreValue: 420, fireCooldown: 1.7, primary: false };
+
+    return this.addEnemy(kind, position, {
+      primary: opts.primary ?? defaults.primary,
+      health: opts.health ?? defaults.health,
+      scoreValue: opts.scoreValue ?? defaults.scoreValue,
+      fireCooldown: opts.fireCooldown ?? defaults.fireCooldown,
+      orbitCenter: opts.orbitCenter,
+      orbitRadius: opts.orbitRadius,
+      orbitHeight: opts.orbitHeight,
+      orbitAngle: opts.orbitAngle,
+      tag: opts.tag,
+      velocity: opts.velocity,
+      scale: opts.scale,
+    });
+  }
+
+  /** Remove alive enemies matching a tag (despawn without score). */
+  despawnByTag(tag: string) {
+    for (const enemy of this.enemies) {
+      if (!enemy.alive || enemy.tag !== tag) continue;
+      enemy.alive = false;
+      enemy.mesh.visible = false;
+    }
+  }
+
+  /** Clear every enemy mesh (full reset helper). */
+  clearAlive() {
+    this.clear();
+  }
+
   private addEnemy(
     kind: EnemyKind,
     position: THREE.Vector3,
@@ -755,8 +834,11 @@ export class EnemySystem {
       formationPull?: number;
       eliteId?: string;
       tintOverride?: number;
+      tag?: string;
+      velocity?: THREE.Vector3;
+      scale?: number;
     },
-  ) {
+  ): Enemy {
     let mesh: THREE.Group;
     let radius: number;
     if (kind === 'turret') {
@@ -771,6 +853,11 @@ export class EnemySystem {
     } else {
       mesh = makeDepotMesh();
       radius = 2.8;
+    }
+
+    if (opts.scale && opts.scale !== 1) {
+      mesh.scale.setScalar(opts.scale);
+      radius *= opts.scale;
     }
 
     mesh.position.copy(position);
@@ -830,8 +917,11 @@ export class EnemySystem {
       interceptBias: opts.interceptBias ?? 0,
       flankBias: opts.flankBias ?? 0,
       formationPull: opts.formationPull ?? 0,
+      tag: opts.tag ?? null,
+      velocity: opts.velocity?.clone() ?? null,
     };
     this.enemies.push(enemy);
+    return enemy;
   }
 
   update(
@@ -928,6 +1018,14 @@ export class EnemySystem {
           const mat = tel.material as THREE.MeshBasicMaterial;
           mat.opacity = enemy.telegraph.intensity * (enemy.eliteId ? 1.0 : 0.85);
           tel.scale.setScalar(1 + enemy.telegraph.intensity * (enemy.eliteId ? 0.55 : 0.35));
+        }
+      } else if (enemy.velocity) {
+        enemy.position.addScaledVector(enemy.velocity, dt);
+        // Keep moving ground units visually alive without leaving their lane.
+        enemy.position.y += Math.sin(time * 2 + enemy.id) * 0.01;
+        enemy.mesh.position.copy(enemy.position);
+        if (enemy.velocity.lengthSq() > 0.01) {
+          enemy.mesh.rotation.y = Math.atan2(enemy.velocity.x, enemy.velocity.z);
         }
       }
 
