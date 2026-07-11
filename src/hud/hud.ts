@@ -448,6 +448,9 @@ export class HUD {
       countLabel: string;
       phaseIndex: number;
       phaseTotal: number;
+      hudTag?: string;
+      actCode?: string;
+      actTitle?: string;
     };
     lives?: number;
   }) {
@@ -466,7 +469,7 @@ export class HUD {
     const lives =
       state.lives != null ? ` · ${state.lives} hull${state.lives === 1 ? '' : 's'}` : '';
     this.setMission({
-      tag: `OP · SUNSET · ${state.phase.code}`,
+      tag: state.phase.hudTag ?? `OP · SUNSET · ${state.phase.code}`,
       title: state.phase.verb,
       detail: `${state.phase.detail}${lives}`,
       progress: state.phase.progress,

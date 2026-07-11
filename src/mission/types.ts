@@ -52,6 +52,12 @@ export interface PhaseHudState {
   detail: string;
   progress: number;
   countLabel: string;
+  /** e.g. "ACT II" */
+  actCode: string;
+  /** e.g. "ESCALATION" */
+  actTitle: string;
+  /** Combined tag for HUD: "ACT II · P4" */
+  hudTag: string;
 }
 
 export interface StrikeHudState {

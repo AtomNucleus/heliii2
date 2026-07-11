@@ -6,7 +6,8 @@ import { EnemySystem, type EnemyLayoutOptions } from '../combat/enemies';
 import { CombatEffects } from '../combat/effects';
 import type { CheckpointSystem } from '../rings/checkpoints';
 import type { MissionOutcome } from '../combat/mission';
-import { OPERATION_PHASES, getPhaseDef, nextPhaseId, PHASE_PAR_SECONDS } from './phases';
+import { getPhaseDef } from './phases';
+import { MissionDirector, actForPhase } from './director';
 import { RadioChatter, RADIO_SCRIPTS } from './radio';
 import { ObjectiveMarkers } from './markers';
 import {
@@ -37,8 +38,7 @@ const CRITICAL_RADIO_COOLDOWN = 18;
 
 /**
  * Authored cinematic strike mission for Operation SUNSET.
- * Reuses CombatMission subsystems (health, weapons, enemies, scoring, effects)
- * with phased objectives, radio narrative, checkpoints, and replay grades.
+ * Combat adapter over Health/Weapons/Enemies/Scoring; pacing & acts live in MissionDirector.
  */
 export class StrikeMission {
   readonly health: HealthSystem;
@@ -48,11 +48,11 @@ export class StrikeMission {
   readonly effects: CombatEffects;
   readonly radio = new RadioChatter();
   readonly markers: ObjectiveMarkers;
+  readonly director = new MissionDirector();
 
   /** Optional: main teleports heli on checkpoint respawn. */
   onRespawn: ((pos: THREE.Vector3) => void) | null = null;
 
-  private outcome: MissionOutcome = 'playing';
   private elapsed = 0;
   private ramCooldown = 0;
   private nearMissCooldown = 0;
@@ -65,13 +65,9 @@ export class StrikeMission {
   private readonly forward = new THREE.Vector3();
   private readonly muzzle = new THREE.Vector3();
 
-  private phaseId: PhaseId = 'ingress';
-  private phaseElapsed = 0;
   private holdProgress = 0;
   private lives = STARTING_LIVES;
   private checkpointsUsed = 0;
-  private phasesCompleted = 0;
-  private softNudgeSent = false;
   private criticalRadioAt = -999;
   private reconRadioTier = 0;
   private convoyEscapeX = 0;
@@ -80,6 +76,7 @@ export class StrikeMission {
   private retaliationWave = 0;
   private bunkerStage = 0;
   private gauntletSetpieceFired = false;
+  private lastActId = 0;
   private waveCtx: WaveContext;
   private checkpointPos = new THREE.Vector3();
   private checkpointLabel: string | null = null;
@@ -103,6 +100,22 @@ export class StrikeMission {
     this.markers = new ObjectiveMarkers(scene);
     // Start empty — phases spawn content
     this.enemies.clear();
+
+    this.director.onTransition((ev) => {
+      if (ev.type === 'phaseEnter') {
+        this.applyPhaseEnter(ev.phaseId, ev.isMissionStart, ev.act.id);
+      } else if (ev.type === 'softNudge') {
+        this.radio.say(RADIO_SCRIPTS.softNudge(ev.phaseId));
+      } else if (ev.type === 'phaseComplete') {
+        this.scoring.addFlat(ev.bonus);
+        this.emit({
+          type: 'toast',
+          message: `${ev.def.title} COMPLETE · +${ev.bonus}`,
+        });
+      } else if (ev.type === 'missionEnd') {
+        this.finish(ev.outcome);
+      }
+    });
 
     this.health.onDamage((ev) => {
       this.emit({
@@ -133,11 +146,11 @@ export class StrikeMission {
   }
 
   get phase(): MissionOutcome {
-    return this.outcome;
+    return this.director.missionOutcome;
   }
 
   get currentPhaseId(): PhaseId {
-    return this.phaseId;
+    return this.director.currentPhaseId;
   }
 
   get summary(): StrikeEndSummary | null {
@@ -157,7 +170,6 @@ export class StrikeMission {
   }
 
   reset() {
-    this.outcome = 'playing';
     this.elapsed = 0;
     this.ramCooldown = 0;
     this.nearMissCooldown = 0;
@@ -166,8 +178,6 @@ export class StrikeMission {
     this.lastSummary = null;
     this.lives = STARTING_LIVES;
     this.checkpointsUsed = 0;
-    this.phasesCompleted = 0;
-    this.softNudgeSent = false;
     this.criticalRadioAt = -999;
     this.reconRadioTier = 0;
     this.convoyEscaped = false;
@@ -176,7 +186,7 @@ export class StrikeMission {
     this.bunkerStage = 0;
     this.gauntletSetpieceFired = false;
     this.holdProgress = 0;
-    this.phaseElapsed = 0;
+    this.lastActId = 0;
     this.checkpointLabel = null;
     this.checkpointPos.copy(this.layoutOpts.spawn);
     this.waveCtx = makeWaveContext(this.layoutOpts);
@@ -190,23 +200,26 @@ export class StrikeMission {
     this.radio.reset();
     this.checkpoints.reset();
 
-    this.phaseId = 'ingress';
-    this.beginPhase('ingress', true);
+    this.director.reset();
   }
 
   getHudState(): StrikeHudState {
     const snap = this.scoring.getSnapshot();
-    const def = getPhaseDef(this.phaseId);
+    const def = this.director.currentPhase;
+    const act = this.director.currentAct;
     const phaseHud: PhaseHudState = {
-      phaseId: this.phaseId,
+      phaseId: def.id,
       phaseIndex: def.index,
-      phaseTotal: OPERATION_PHASES.length,
+      phaseTotal: this.director.phaseTotal,
       code: def.code,
       title: def.title,
       verb: def.verb,
       detail: this.phaseDetail,
       progress: this.computePhaseProgress(),
       countLabel: this.phaseCountLabel(),
+      actCode: act.code,
+      actTitle: act.title,
+      hudTag: this.director.hudTag(),
     };
 
     return {
@@ -231,7 +244,7 @@ export class StrikeMission {
   }
 
   applyExternalDamage(amount: number, source = 'impact'): number {
-    if (this.outcome !== 'playing') return 0;
+    if (!this.director.isPlaying) return 0;
     const applied = this.health.takeDamage(amount, source);
     if (applied > 0) this.damageFlash = 1;
     return applied;
@@ -244,10 +257,10 @@ export class StrikeMission {
     yaw: number,
     heliVelocity?: THREE.Vector3,
   ): MissionOutcome {
-    if (this.outcome !== 'playing') return this.outcome;
+    if (!this.director.isPlaying) return this.director.missionOutcome;
 
     this.elapsed += dt;
-    this.phaseElapsed += dt;
+    this.director.tick(dt);
     this.health.update(dt);
     this.scoring.update(dt);
     this.effects.update(dt);
@@ -290,6 +303,7 @@ export class StrikeMission {
     }
     this.weapons.compact();
 
+    const phaseId = this.director.currentPhaseId;
     for (const hit of hits) {
       if (hit.destroyed) {
         const points = this.scoring.addKill(hit.points);
@@ -302,7 +316,7 @@ export class StrikeMission {
         });
         if (hit.enemy.primary) {
           const left = this.enemies.primaryAlive;
-          if (left > 0 && (this.phaseId === 'firstStrike' || this.phaseId === 'aaGauntlet')) {
+          if (left > 0 && (phaseId === 'firstStrike' || phaseId === 'aaGauntlet')) {
             this.emit({ type: 'toast', message: `TARGET DOWN · ${left} LEFT` });
           }
         } else if (
@@ -355,22 +369,26 @@ export class StrikeMission {
 
     if (!this.health.alive) {
       this.handleDeath();
-      return this.outcome;
+      return this.director.missionOutcome;
     }
 
-    return this.outcome;
+    return this.director.missionOutcome;
   }
 
-  private beginPhase(id: PhaseId, isMissionStart: boolean) {
-    this.phaseId = id;
-    this.phaseElapsed = 0;
-    this.softNudgeSent = false;
+  private applyPhaseEnter(id: PhaseId, isMissionStart: boolean, actId: number) {
     this.holdProgress = 0;
     this.reconRadioTier = 0;
     const def = getPhaseDef(id);
 
     this.emit({ type: 'phase', phaseId: id, title: def.title });
     this.emit({ type: 'toast', message: `${def.code} · ${def.title}` });
+
+    if (!isMissionStart && actId !== this.lastActId) {
+      const act = actForPhase(id);
+      this.radio.say(RADIO_SCRIPTS.actTransition(act.code, act.title));
+      this.emit({ type: 'setpiece', name: `ACT_${actId}_${act.title}` });
+    }
+    this.lastActId = actId;
 
     switch (id) {
       case 'ingress':
@@ -438,6 +456,8 @@ export class StrikeMission {
     this.markers.clear();
     spawnAmbientThreats(this.enemies, this.waveCtx);
     spawnFirstStrikeDepots(this.enemies, this.waveCtx);
+    this.objectiveTargetsTotal = this.enemies.countAlive({ tag: 'first-strike' });
+    this.objectiveTargetsLeft = this.objectiveTargetsTotal;
     this.radio.say(RADIO_SCRIPTS.firstStrikeStart);
     this.markPrimaryBeacons();
   }
@@ -448,6 +468,8 @@ export class StrikeMission {
     this.enemies.clear();
     spawnAaGauntlet(this.enemies, this.waveCtx);
     this.gauntletSetpieceFired = false;
+    this.objectiveTargetsTotal = this.enemies.countAlive({ tag: 'gauntlet' });
+    this.objectiveTargetsLeft = this.objectiveTargetsTotal;
     this.radio.say(RADIO_SCRIPTS.aaGauntletStart);
     this.emit({ type: 'setpiece', name: 'AA_GAUNTLET' });
     this.markPrimaryBeacons();
@@ -519,20 +541,11 @@ export class StrikeMission {
   }
 
   private updatePhaseLogic(dt: number, heliPos: THREE.Vector3) {
-    const def = getPhaseDef(this.phaseId);
+    const phaseId = this.director.currentPhaseId;
+    const def = this.director.currentPhase;
+    const phaseElapsed = this.director.elapsedInPhase;
 
-    // Soft pacing nudge
-    if (
-      !this.softNudgeSent &&
-      def.softTimer &&
-      this.phaseElapsed > def.softTimer &&
-      this.phaseId === 'ingress'
-    ) {
-      this.softNudgeSent = true;
-      this.radio.say(RADIO_SCRIPTS.ingressNudge);
-    }
-
-    switch (this.phaseId) {
+    switch (phaseId) {
       case 'ingress':
         this.refreshObjectiveCounts();
         if (this.markers.isInsideAny(heliPos)) {
@@ -576,7 +589,7 @@ export class StrikeMission {
       case 'aaGauntlet':
         this.refreshObjectiveCounts();
         this.markPrimaryBeacons();
-        if (!this.gauntletSetpieceFired && this.phaseElapsed > 4) {
+        if (!this.gauntletSetpieceFired && phaseElapsed > 4) {
           this.gauntletSetpieceFired = true;
           this.radio.say(RADIO_SCRIPTS.aaGauntletSetpiece);
           // Flak spike: briefly faster fire on remaining turrets
@@ -594,7 +607,7 @@ export class StrikeMission {
         this.refreshObjectiveCounts();
         this.markPrimaryBeacons();
         const trucks = this.enemies.getAlive({ tag: 'convoy' });
-        if (!this.convoyEscortCalled && this.phaseElapsed > 8) {
+        if (!this.convoyEscortCalled && phaseElapsed > 8) {
           this.convoyEscortCalled = true;
           this.radio.say(RADIO_SCRIPTS.convoyEscort);
           this.emit({ type: 'setpiece', name: 'CONVOY_ESCORT' });
@@ -668,12 +681,10 @@ export class StrikeMission {
         }
         break;
     }
-
-    void dt;
   }
 
   private refreshObjectiveCounts() {
-    switch (this.phaseId) {
+    switch (this.director.currentPhaseId) {
       case 'firstStrike':
         this.objectiveTargetsTotal = Math.max(
           this.objectiveTargetsTotal,
@@ -706,7 +717,7 @@ export class StrikeMission {
   }
 
   private computePhaseProgress(): number {
-    const def = getPhaseDef(this.phaseId);
+    const def = this.director.currentPhase;
     if (def.objective === 'hold') {
       return Math.min(1, this.holdProgress / HOLD_SECONDS);
     }
@@ -718,7 +729,7 @@ export class StrikeMission {
   }
 
   private phaseCountLabel(): string {
-    const def = getPhaseDef(this.phaseId);
+    const def = this.director.currentPhase;
     if (def.objective === 'hold') {
       return `${Math.min(100, Math.round((this.holdProgress / HOLD_SECONDS) * 100))}%`;
     }
@@ -732,16 +743,11 @@ export class StrikeMission {
   }
 
   private completePhase() {
-    const def = getPhaseDef(this.phaseId);
-    this.scoring.addFlat(def.completionBonus);
-    this.phasesCompleted += 1;
-    this.emit({
-      type: 'toast',
-      message: `${def.title} COMPLETE · +${def.completionBonus}`,
-    });
+    const phaseId = this.director.currentPhaseId;
+    const def = getPhaseDef(phaseId);
 
-    // Phase-complete radio
-    switch (this.phaseId) {
+    // Phase-complete radio before director advances
+    switch (phaseId) {
       case 'ingress':
         break; // recon start lines handle this
       case 'recon':
@@ -778,12 +784,8 @@ export class StrikeMission {
       this.checkpointPos.clone();
     this.saveCheckpoint(`${def.code} ${def.title}`, savePos);
 
-    const next = nextPhaseId(this.phaseId);
-    if (!next) {
-      this.finish('won');
-      return;
-    }
-    this.beginPhase(next, false);
+    // Director awards bonus, enters next phase, or ends mission (won)
+    this.director.completeCurrentPhase();
   }
 
   private saveCheckpoint(label: string, pos: THREE.Vector3) {
@@ -791,7 +793,15 @@ export class StrikeMission {
     if (pos.y < 2) this.checkpointPos.y = this.layoutOpts.getGroundHeight(pos.x, pos.z) + 8;
     this.checkpointLabel = label;
     this.emit({ type: 'checkpoint', label });
-    this.radio.say(RADIO_SCRIPTS.checkpointSaved(label));
+    // Quiet confirm — avoid stacking on phase-complete radio
+    this.radio.say([
+      {
+        callsign: 'COMMAND',
+        text: `Checkpoint · ${label}.`,
+        hold: 1.8,
+        delay: 0.4,
+      },
+    ]);
   }
 
   private handleDeath() {
@@ -800,30 +810,38 @@ export class StrikeMission {
       this.checkpointsUsed += 1;
       this.scoring.addFlat(-400);
       this.health.reset();
-      this.health.grantInvulnerability(2.2);
+      this.health.grantInvulnerability(2.8);
+      // Clear inbound fire so recovery feels fair
       this.weapons.reset();
       this.damageFlash = 0;
-      this.radio.interrupt(RADIO_SCRIPTS.phaseRestart(getPhaseDef(this.phaseId).title)[0]!);
+      this.ramCooldown = 1.2;
+      this.nearMissCooldown = 1.0;
+      // Soft pressure relief: pause AA briefly by bumping fire timers
+      for (const e of this.enemies.getAlive()) {
+        e.fireTimer = Math.max(e.fireTimer, 1.8 + Math.random() * 0.6);
+      }
+      this.director.onCheckpointRecover();
+      this.radio.interrupt(RADIO_SCRIPTS.phaseRestart(this.director.currentPhase.title)[0]!);
       this.emit({
         type: 'toast',
         message: `CHECKPOINT · ${this.lives} HULL${this.lives === 1 ? '' : 'S'} LEFT`,
       });
       this.onRespawn?.(this.checkpointPos.clone());
-      // Soft reset phase pressure without wiping progress objectives mid-combat
-      this.phaseElapsed = 0;
       return;
     }
 
-    this.finish('lost');
+    this.director.failMission();
   }
 
   private finish(outcome: 'won' | 'lost') {
-    this.outcome = outcome;
+    // Idempotent — director may already have set outcome
+    if (this.lastSummary && this.lastSummary.outcome === outcome) return;
+
     const snap = this.scoring.getSnapshot();
     let timeBonus = 0;
     let healthBonus = 0;
     if (outcome === 'won') {
-      timeBonus = this.scoring.applyTimeBonus(this.elapsed, PHASE_PAR_SECONDS);
+      timeBonus = this.scoring.applyTimeBonus(this.elapsed, this.director.parSeconds);
       healthBonus = this.scoring.applyHealthBonus(this.health.ratio);
       if (snap.rings >= this.checkpoints.total) {
         this.scoring.addFlat(1000);
@@ -840,13 +858,11 @@ export class StrikeMission {
       time: this.elapsed,
       healthRatio: this.health.ratio,
       bestCombo: snap.bestCombo,
-      phasesCompleted: this.phasesCompleted,
-      phaseTotal: OPERATION_PHASES.length,
+      phasesCompleted: this.director.completedCount,
+      phaseTotal: this.director.phaseTotal,
       checkpointsUsed: this.checkpointsUsed,
     });
     const { best, isNewBest } = saveBestScore(outcome === 'won' ? finalScore : 0);
-    // Always track best even on loss if score beats (optional) — only wins update above;
-    // still expose loaded best for display
     const displayBest = Math.max(best, loadBestScore());
 
     this.lastSummary = {
@@ -859,7 +875,7 @@ export class StrikeMission {
       timeBonus,
       healthBonus,
       grade,
-      phasesCompleted: this.phasesCompleted,
+      phasesCompleted: this.director.completedCount,
       checkpointsUsed: this.checkpointsUsed,
       bestScore: displayBest,
       isNewBest: outcome === 'won' && isNewBest,

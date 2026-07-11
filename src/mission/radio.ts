@@ -106,6 +106,36 @@ export const RADIO_SCRIPTS = {
     },
   ] as RadioLine[],
 
+  /** Soft pacing nudges keyed by phase — director fires once past softTimer. */
+  softNudge: (phaseId: string): RadioLine[] => {
+    const lines: Record<string, string> = {
+      ingress: 'Still waiting on that grid. Push east — beacon is live.',
+      recon: 'Scan incomplete. Get back inside the volume.',
+      firstStrike: 'Depots still standing. Finish First Strike.',
+      aaGauntlet: 'Gauntlet is chewing time. Silence those nests.',
+      convoy: 'Convoy is burning daylight — cut them off west.',
+      retaliation: 'Swarm still up. Clear the wave before the bunker.',
+      commandBunker: 'Bunker still online. Keep pressure on the core.',
+      exfil: 'Extract is open. Do not linger — get to the LZ.',
+    };
+    return [
+      {
+        callsign: 'COMMAND',
+        text: lines[phaseId] ?? 'Clock is live. Push the objective.',
+        hold: 2.8,
+      },
+    ];
+  },
+
+  actTransition: (actCode: string, actTitle: string): RadioLine[] => [
+    {
+      callsign: 'COMMAND',
+      text: `${actCode} — ${actTitle}. New threat picture.`,
+      hold: 3.0,
+      delay: 0.2,
+    },
+  ],
+
   ingressComplete: [
     {
       callsign: 'COMMAND',

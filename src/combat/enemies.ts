@@ -96,6 +96,8 @@ export interface Enemy {
   tag: string | null;
   /** Optional linear patrol velocity (XZ units/sec) */
   velocity: THREE.Vector3 | null;
+  /** Authored mesh scale (primary pulse multiplies this, never replaces it) */
+  baseScale: number;
 }
 
 export interface EnemyHitResult {
@@ -872,6 +874,7 @@ export class EnemySystem {
           : null;
 
     const fireCooldown = opts.fireCooldown ?? 99;
+    const baseScale = opts.scale ?? 1;
     const enemy: Enemy = {
       id: nextEnemyId++,
       kind,
@@ -919,6 +922,7 @@ export class EnemySystem {
       formationPull: opts.formationPull ?? 0,
       tag: opts.tag ?? null,
       velocity: opts.velocity?.clone() ?? null,
+      baseScale,
     };
     this.enemies.push(enemy);
     return enemy;
@@ -1064,7 +1068,7 @@ export class EnemySystem {
       }
 
       if (enemy.primary) {
-        const pulse = 1 + Math.sin(time * 3 + enemy.id) * 0.045;
+        const pulse = enemy.baseScale * (1 + Math.sin(time * 3 + enemy.id) * 0.045);
         enemy.mesh.scale.setScalar(pulse);
         if (enemy.beacon) {
           const mat = enemy.beacon.material as THREE.MeshBasicMaterial;

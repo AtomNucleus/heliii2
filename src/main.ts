@@ -454,7 +454,7 @@ async function boot() {
           hud.showRadio(event.callsign, event.text, event.hold);
           break;
         case 'phase':
-          // StrikeMission already toasts phase code/title
+          hud.toast(`PHASE · ${event.title}`, 1.8);
           break;
         case 'checkpoint':
           hud.toast(`CHECKPOINT · ${event.label}`, 1.4);

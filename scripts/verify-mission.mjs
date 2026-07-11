@@ -11,6 +11,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const phasesSrc = readFileSync(join(root, 'src/mission/phases.ts'), 'utf8');
 const gradeSrc = readFileSync(join(root, 'src/mission/grade.ts'), 'utf8');
 const strikeSrc = readFileSync(join(root, 'src/mission/strikeMission.ts'), 'utf8');
+const directorSrc = readFileSync(join(root, 'src/mission/director.ts'), 'utf8');
 const mainSrc = readFileSync(join(root, 'src/main.ts'), 'utf8');
 
 const paceMatches = [...phasesSrc.matchAll(/paceMinutes:\s*([0-9.]+)/g)].map((m) =>
@@ -35,8 +36,10 @@ assert('grade helpers present', /gradeFromRun|loadBestScore|saveBestScore/.test(
 assert('strike mission has checkpoints', /saveCheckpoint|checkpointsUsed|STARTING_LIVES/.test(strikeSrc));
 assert('strike mission has radio', /RadioChatter|RADIO_SCRIPTS/.test(strikeSrc));
 assert('strike mission has waves/setpieces', /spawnRetaliationWave|setpiece|spawnConvoy|spawnCommandBunker/.test(strikeSrc));
+assert('mission director state machine', /MissionDirector|OPERATION_ACTS|softNudge|onCheckpointRecover/.test(directorSrc));
+assert('three-act framing', /ACT I|ACT II|ACT III|INFILTRATION|ESCALATION/.test(directorSrc));
 assert('main integrates StrikeMission', /StrikeMission/.test(mainSrc) && /updateStrike|showRadio/.test(mainSrc));
-assert('main stays thin on mission logic', !/spawnFirstStrikeDepots|OPERATION_PHASES/.test(mainSrc));
+assert('main stays thin on mission logic', !/spawnFirstStrikeDepots|OPERATION_PHASES|MissionDirector/.test(mainSrc));
 
 const failed = checks.filter((c) => !c.ok);
 for (const c of checks) {
