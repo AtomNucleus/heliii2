@@ -1037,6 +1037,7 @@ export class EnemySystem {
       }
 
       this.weapons.spawnEnemyBolt(this.tmpOrigin, this.tmpDir, enemy.boltDamage);
+      this.effects.spawnTracer(this.tmpOrigin, this.tmpDir, COLORS.orangeHot);
     }
   }
 

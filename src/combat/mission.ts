@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { QualitySettings } from '../effects/quality';
 import { HealthSystem } from './health';
 import { ScoringSystem, type ScoreSnapshot } from './scoring';
 import { WeaponSystem } from './weapons';
@@ -84,6 +85,7 @@ export class CombatMission {
   private readonly listeners: MissionEventListener[] = [];
   private readonly forward = new THREE.Vector3();
   private readonly muzzle = new THREE.Vector3();
+  private readonly heliPos = new THREE.Vector3();
 
   constructor(
     scene: THREE.Scene,
@@ -99,9 +101,12 @@ export class CombatMission {
     this.enemies = new EnemySystem(scene, this.weapons, this.effects);
     this.director = new DifficultyDirector();
     this.enemies.spawnMission(layoutOpts);
+    this.effects.setGroundHeight(layoutOpts.getGroundHeight);
 
     this.health.onDamage((ev) => {
       this.timeSinceDamage = 0;
+      this.damageFlash = 1;
+      this.effects.spawnDamageFeedback(this.heliPos, ev.amount);
       this.emit({
         type: 'damage',
         amount: ev.amount,
@@ -109,6 +114,15 @@ export class CombatMission {
         remaining: ev.remaining,
       });
     });
+  }
+
+  /** Adaptive quality budgets for pooled combat VFX. */
+  applyQuality(q: QualitySettings) {
+    this.effects.applyQuality(q);
+  }
+
+  setEffectsCamera(camera: THREE.Camera | null) {
+    this.effects.setCamera(camera);
   }
 
   onEvent(listener: MissionEventListener) {
@@ -187,9 +201,7 @@ export class CombatMission {
   /** External damage (hard landing) feeds the same hull pool. */
   applyExternalDamage(amount: number, source = 'impact'): number {
     if (this.outcome !== 'playing') return 0;
-    const applied = this.health.takeDamage(amount, source);
-    if (applied > 0) this.damageFlash = 1;
-    return applied;
+    return this.health.takeDamage(amount, source);
   }
 
   /**
@@ -209,6 +221,8 @@ export class CombatMission {
     this.timeSinceKill += dt;
     this.health.update(dt);
     this.scoring.update(dt);
+    this.heliPos.copy(heli.position);
+    this.effects.setFollowTarget(this.heliPos);
     this.effects.update(dt);
 
     const snap = this.scoring.getSnapshot();
@@ -326,6 +340,7 @@ export class CombatMission {
       const dist = p.mesh.position.distanceTo(heli.position);
       if (dist < 2.5 + p.radius) {
         const applied = this.health.takeDamage(p.damage, 'aa-fire');
+        this.effects.spawnHitSpark(p.mesh.position.clone());
         this.weapons.despawn(p);
         if (applied > 0) this.damageFlash = 1;
       } else if (

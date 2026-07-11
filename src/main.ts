@@ -276,6 +276,9 @@ async function boot() {
       checkpoints,
     );
     world.environment?.applyQuality(fx.quality.current);
+    mission.setEffectsCamera(camera);
+    mission.applyQuality(fx.quality.current);
+    fx.quality.onChange((q) => mission.applyQuality(q));
     hud = new HUD(checkpoints.total);
     hud.enableCombatHud(true);
     hud.bindMuteHandler((muted) => audio.setMuted(muted));
