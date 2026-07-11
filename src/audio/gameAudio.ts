@@ -1,12 +1,12 @@
 /**
  * HELI SUNSET cinematic procedural audio — Web Audio only, no downloads.
  *
- * Layers: rotor/load, turbine, wind + desert bed, dynamic music, spatial combat,
- * Doppler flybys, warnings, radio chatter, mix ducking.
- * Call `resume()` (or any play* method) after a user gesture.
+ * Layers: rotor/load/ground-slap, turbine, wind + desert bed, adaptive score,
+ * spatial combat, Doppler flybys, threat cues, warnings, radio chatter, mix ducking.
+ * Call `resume()` (or any play* / handleEvent) after a user gesture.
  */
 
-import { AudioBus } from './bus';
+import { AudioBus, type BusChannel } from './bus';
 import { SpatialAudio } from './spatial';
 import { RotorBed } from './rotor';
 import { EnvironmentAmbience } from './environment';
@@ -15,6 +15,7 @@ import { RadioChatter } from './radio';
 import { WarningSystem } from './warnings';
 import { CombatSfx } from './combatSfx';
 import { FlybyEngine } from './flyby';
+import { ThreatCues } from './threat';
 import { playTone, playNoiseBurst } from './synth';
 import { clamp } from './util';
 import type {
@@ -26,9 +27,15 @@ import type {
   WarningKind,
   WorldAudioFrame,
 } from './types';
+import type {
+  AudioMissionEvent,
+  RadioCaptionListener,
+} from './events';
 
 export type { ImpactKind, FlightAudioParams, MusicIntensity, RadioCue, WarningKind, WorldAudioFrame };
 export type { SpatialPoint, FlybyCandidate, Vec3Like } from './types';
+export type { AudioMissionEvent, RadioCaption, RadioCaptionListener } from './events';
+export type { BusChannel } from './bus';
 
 export class GameAudio {
   private ctx: AudioContext | null = null;
@@ -42,6 +49,7 @@ export class GameAudio {
   private warnings = new WarningSystem();
   private combat = new CombatSfx();
   private flybys = new FlybyEngine();
+  private threats = new ThreatCues();
 
   private muted = false;
   private flightActive = false;
@@ -49,10 +57,13 @@ export class GameAudio {
   private combatHeat = 0;
   private hullCritical = false;
   private musicIntensity: MusicIntensity = 'idle';
+  private lastBoosting = false;
+  private visibilityBound = false;
+  private disposed = false;
 
   /** Ensure AudioContext + bus exist (lazy). Safe to call repeatedly. */
   ensure(): AudioContext | null {
-    if (typeof window === 'undefined') return null;
+    if (this.disposed || typeof window === 'undefined') return null;
     const AC =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -66,7 +77,9 @@ export class GameAudio {
       this.warnings.attach(this.bus);
       this.combat.attach(this.bus, this.spatial);
       this.flybys.attach(this.bus, this.spatial);
+      this.threats.attach(this.bus, this.spatial);
       if (this.muted) this.bus.setMuted(true);
+      this.bindLifecycle();
     }
     return this.ctx;
   }
@@ -109,6 +122,94 @@ export class GameAudio {
     return this.muted;
   }
 
+  setChannelLevel(channel: BusChannel, level: number) {
+    this.ensure();
+    this.bus?.setChannelLevel(channel, level);
+  }
+
+  setMasterLevel(level: number) {
+    this.ensure();
+    this.bus?.setMasterLevel(level);
+  }
+
+  /** HUD / narrative text-radio captions. */
+  onRadioCaption(listener: RadioCaptionListener) {
+    return this.radio.onCaption(listener);
+  }
+
+  /**
+   * Single entry for mission / UX narrative events.
+   * Prefer this over scattering play* calls from main.
+   */
+  handleEvent(event: AudioMissionEvent) {
+    void this.resume();
+    switch (event.type) {
+      case 'fire':
+        this.playWeaponFire();
+        break;
+      case 'hit':
+        this.playWeaponHit(event.at);
+        break;
+      case 'kill':
+        this.playExplosion(event.primary ? 1.35 : 1, event.at);
+        if (event.combo != null) this.playCombo(event.combo);
+        if (event.primary) {
+          this.playRadio('depot-down', 'DEPOT DOWN');
+          this.setMusicIntensity('combat');
+        } else {
+          this.playRadio('target-down', 'SPLASH');
+        }
+        break;
+      case 'damage':
+        this.playDamage();
+        if (event.remaining != null && event.remaining <= 30 && event.remaining > 0) {
+          this.playRadio('hull-critical', 'HULL CRITICAL');
+          this.setMusicIntensity('critical');
+        }
+        break;
+      case 'ring':
+        this.playRingCollect();
+        break;
+      case 'nearMiss':
+        this.playRadio('near-miss', 'NEAR MISS');
+        this.playWarning('incoming');
+        break;
+      case 'toast':
+        // Narrative toast — soft radio syllable if short enough
+        if (event.message && event.message.length <= 28) {
+          this.playRadioText(event.message);
+        }
+        break;
+      case 'impact':
+        this.playImpact(event.intensity ?? 0.7, event.kind ?? 'hard');
+        break;
+      case 'boost':
+        this.playBoost();
+        break;
+      case 'weapon-ready':
+        this.notifyWeaponReady(event.ready);
+        break;
+      case 'aa-fire':
+        this.playAaFire(event.at);
+        break;
+      case 'radio':
+        this.playRadio(event.cue, event.text);
+        break;
+      case 'warning':
+        this.playWarning(event.kind);
+        break;
+      case 'mission-start':
+        this.playStart();
+        break;
+      case 'mission-complete':
+        this.playMissionComplete();
+        break;
+      case 'mission-failed':
+        this.playMissionFailed();
+        break;
+    }
+  }
+
   // ---- Continuous flight layers ----
 
   /** Start full flight soundscape (rotor + engine + wind + music + radio carrier). */
@@ -122,6 +223,7 @@ export class GameAudio {
     this.music.start(bus);
     this.music.setIntensity(this.musicIntensity === 'idle' ? 'patrol' : this.musicIntensity);
     this.radio.startCarrier();
+    this.threats.start();
     this.flybys.reset();
   }
 
@@ -132,10 +234,12 @@ export class GameAudio {
     this.environment.stop();
     this.music.stop();
     this.radio.stopCarrier();
+    this.threats.stop();
     this.warnings.stopAll();
     this.warnings.setHullCritical(false);
     this.warnings.setLowAltitude(false);
     this.hullCritical = false;
+    this.lastBoosting = false;
   }
 
   startRotor() {
@@ -197,7 +301,6 @@ export class GameAudio {
       0,
       1,
     );
-    // Load: climb, collective, boost, low-speed hover heavy
     const load = clamp(
       Math.max(0, vSpeed) / 18 +
         Math.max(0, lift) * 0.45 +
@@ -207,12 +310,16 @@ export class GameAudio {
       1,
     );
 
-    this.rotor.update(intensity, load);
+    this.rotor.update(intensity, load, { altitude, healthRatio, boosting });
     this.environment.update(speed, altitude, boosting);
     this.combatHeat = clamp(heat, 0, 1);
     this.music.setCombatHeat(this.combatHeat);
 
-    // Warnings from flight state
+    if (boosting && !this.lastBoosting) {
+      this.playBoost();
+    }
+    this.lastBoosting = boosting;
+
     const critical = healthRatio <= 0.3 && healthRatio > 0;
     if (critical !== this.hullCritical) {
       this.hullCritical = critical;
@@ -236,13 +343,14 @@ export class GameAudio {
       );
       this.combat.setListener(params.position, params.velocity);
       this.flybys.setListener(params.position, params.velocity);
+      this.threats.setListener(params.position);
     }
 
     this.bus?.tick();
   }
 
   /**
-   * Per-frame world audio: flybys, inbound bolts, listener pose.
+   * Per-frame world audio: flybys, inbound bolts, threat bed, listener pose.
    * Call from the game loop while playing.
    */
   updateWorld(frame: WorldAudioFrame) {
@@ -256,9 +364,18 @@ export class GameAudio {
     );
     this.combat.setListener(frame.listener, frame.listenerVelocity);
     this.flybys.setListener(frame.listener, frame.listenerVelocity);
+    this.threats.setListener(frame.listener);
 
     if (frame.hostiles?.length) {
       this.flybys.update(frame.hostiles, this.ctx.currentTime);
+      const threat = this.threats.update(frame.hostiles, this.ctx.currentTime);
+      this.music.setThreat(threat);
+      if (threat > 0.55 && this.musicIntensity === 'patrol') {
+        this.setMusicIntensity('combat');
+      }
+    } else {
+      this.music.setThreat(0);
+      this.threats.update([], this.ctx.currentTime);
     }
 
     if (frame.inbound?.length) {
@@ -274,7 +391,6 @@ export class GameAudio {
       }
     }
 
-    // Decay combat heat
     this.combatHeat = Math.max(0, this.combatHeat - frame.dt * 0.12);
     this.music.setCombatHeat(this.combatHeat);
     this.bus?.tick();
@@ -472,6 +588,13 @@ export class GameAudio {
       gain: 0.12,
       duration: 0.2,
     });
+    playTone(this.bus, {
+      type: 'triangle',
+      freq: 55,
+      freqEnd: 90,
+      gain: 0.08,
+      duration: 0.25,
+    });
   }
 
   playUISelect() {
@@ -578,6 +701,45 @@ export class GameAudio {
   get isFlightActive() {
     return this.flightActive;
   }
+
+  /** Tear down context (rare — prefer stopFlightAmbience between missions). */
+  dispose() {
+    this.stopFlightAmbience();
+    this.unbindLifecycle();
+    if (this.ctx) {
+      void this.ctx.close().catch(() => undefined);
+    }
+    this.ctx = null;
+    this.bus = null;
+    this.spatial = null;
+    this.disposed = true;
+  }
+
+  private bindLifecycle() {
+    if (this.visibilityBound || typeof document === 'undefined') return;
+    this.visibilityBound = true;
+    document.addEventListener('visibilitychange', this.onVisibility);
+    window.addEventListener('pagehide', this.onPageHide);
+  }
+
+  private unbindLifecycle() {
+    if (!this.visibilityBound) return;
+    document.removeEventListener('visibilitychange', this.onVisibility);
+    window.removeEventListener('pagehide', this.onPageHide);
+    this.visibilityBound = false;
+  }
+
+  private onVisibility = () => {
+    if (document.hidden) {
+      void this.suspend();
+    } else if (this.flightActive) {
+      void this.resume();
+    }
+  };
+
+  private onPageHide = () => {
+    void this.suspend();
+  };
 }
 
 /** Shared singleton for convenience — gameplay may also `new GameAudio()`. */

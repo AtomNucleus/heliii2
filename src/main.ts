@@ -84,7 +84,7 @@ function startGame() {
   mobileControls.show();
   void audio.resume();
   audio.setMusicIntensity('patrol');
-  audio.playStart();
+  audio.handleEvent({ type: 'mission-start' });
   audio.startFlightAmbience();
   clock.start();
 }
@@ -95,8 +95,7 @@ function finishMission(summary: MissionEndSummary) {
   controller.enabled = false;
   mobileControls.hide();
   audio.stopFlightAmbience();
-  if (won) audio.playMissionComplete();
-  else audio.playMissionFailed();
+  audio.handleEvent({ type: won ? 'mission-complete' : 'mission-failed' });
   hud.showComplete({
     title: won ? 'MISSION COMPLETE' : 'HULL DESTROYED',
     subtitle: won ? 'Fruzer strike successful' : 'Ejected over hostile territory',
@@ -248,7 +247,7 @@ function animate() {
       };
       if (!heardBolts.has(id)) {
         heardBolts.add(id);
-        audio.playAaFire(pt);
+        audio.handleEvent({ type: 'aa-fire', at: pt });
       }
       const dx = pt.x - heli.position.x;
       const dy = pt.y - heli.position.y;
@@ -368,59 +367,83 @@ async function boot() {
     hud = new HUD(checkpoints.total);
     hud.enableCombatHud(true);
     hud.bindMuteHandler((muted) => audio.setMuted(muted));
-    hud.onWeaponReadyChange = (ready) => audio.notifyWeaponReady(ready);
+    hud.onWeaponReadyChange = (ready) =>
+      audio.handleEvent({ type: 'weapon-ready', ready });
+    let lastRadioToast = '';
+    let lastRadioToastAt = 0;
+    audio.onRadioCaption((caption) => {
+      // Text-radio hook — skip if HUD already showed the same line
+      if (phase !== 'playing' || !caption.text) return;
+      const now = performance.now();
+      if (caption.text === lastRadioToast && now - lastRadioToastAt < 1400) return;
+      lastRadioToast = caption.text;
+      lastRadioToastAt = now;
+      // Only surface captions that aren't already toasted by mission UI
+      if (
+        caption.cue === 'mission-start' ||
+        caption.cue === 'weapons-free' ||
+        caption.cue === 'bingo' ||
+        caption.cue === 'mayday' ||
+        caption.cue === 'mission-complete' ||
+        caption.cue === 'text'
+      ) {
+        hud.toast(caption.text, 1.1);
+      }
+    });
 
     mission.onEvent((event) => {
       switch (event.type) {
         case 'fire':
-          audio.playWeaponFire();
+          audio.handleEvent({ type: 'fire' });
           break;
         case 'hit': {
           hud.setCrosshairState('hit', 180);
           const hp = event.enemy.position;
-          audio.playWeaponHit({ x: hp.x, y: hp.y, z: hp.z });
+          audio.handleEvent({
+            type: 'hit',
+            at: { x: hp.x, y: hp.y, z: hp.z },
+          });
           break;
         }
         case 'kill': {
           hud.setCrosshairState('hit', 260);
           const kp = event.enemy.position;
-          audio.playExplosion(event.primary ? 1.35 : 1, {
-            x: kp.x,
-            y: kp.y,
-            z: kp.z,
-          });
-          audio.playCombo(event.combo);
           if (event.primary) {
             hud.toast(`DEPOT DOWN · +${event.points}`, 1.5);
-            audio.playRadio('depot-down', 'DEPOT DOWN');
-            audio.setMusicIntensity('combat');
-          } else {
-            audio.playRadio('target-down', 'SPLASH');
           }
+          audio.handleEvent({
+            type: 'kill',
+            at: { x: kp.x, y: kp.y, z: kp.z },
+            primary: event.primary,
+            combo: event.combo,
+            points: event.points,
+          });
           break;
         }
         case 'damage':
           hud.flashDamage(event.amount / 20);
-          audio.playDamage();
           controller.addCameraShake(Math.min(0.8, event.amount / 30));
           if (event.remaining <= 30 && event.remaining > 0) {
             hud.toast('HULL CRITICAL', 1.2);
-            audio.playRadio('hull-critical', 'HULL CRITICAL');
-            audio.setMusicIntensity('critical');
           }
+          audio.handleEvent({
+            type: 'damage',
+            amount: event.amount,
+            remaining: event.remaining,
+          });
           break;
         case 'ring':
           hud.pulseRingCollect();
-          audio.playRingCollect();
           hud.toast(`RING · +${event.points} · HULL +8`, 1.2);
+          audio.handleEvent({ type: 'ring', points: event.points });
           break;
         case 'nearMiss':
           hud.toast(`NEAR MISS · +${event.points}`, 0.9);
-          audio.playRadio('near-miss', 'NEAR MISS');
-          audio.playWarning('incoming');
+          audio.handleEvent({ type: 'nearMiss', points: event.points });
           break;
         case 'toast':
           hud.toast(event.message);
+          audio.handleEvent({ type: 'toast', message: event.message });
           break;
       }
     });
@@ -440,16 +463,25 @@ async function boot() {
             : 'hard-landing';
       if (damage > 0) mission.applyExternalDamage(damage, source);
       if (info?.destroyedProp) {
-        audio.playImpact(Math.max(0.35, intensity), 'hard');
+        audio.handleEvent({
+          type: 'impact',
+          intensity: Math.max(0.35, intensity),
+          kind: 'hard',
+        });
         return;
       }
       if (info?.scrape && !info.crash) {
-        audio.playImpact(Math.max(0.25, intensity), damage > 0 ? 'soft' : 'soft');
+        audio.handleEvent({
+          type: 'impact',
+          intensity: Math.max(0.25, intensity),
+          kind: 'soft',
+        });
       } else {
-        audio.playImpact(
+        audio.handleEvent({
+          type: 'impact',
           intensity,
-          damage > 8 || info?.crash ? 'damage' : 'hard',
-        );
+          kind: damage > 8 || info?.crash ? 'damage' : 'hard',
+        });
       }
     };
 

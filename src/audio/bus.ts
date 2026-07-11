@@ -1,5 +1,5 @@
 /**
- * Mix bus: master + category gains with soft ducking.
+ * Mix bus: master + category gains with soft ducking and a safety limiter.
  * Music/ambience duck under combat SFX and warnings.
  */
 
@@ -13,39 +13,59 @@ export class AudioBus {
   readonly ambience: GainNode;
   readonly radio: GainNode;
   readonly warn: GainNode;
+  readonly limiter: DynamicsCompressorNode;
 
   private muted = false;
-  private masterTarget = 0.85;
+  private masterTarget = 0.88;
   private duckUntil = 0;
   private duckAmount = 0;
   private musicBase = 0.42;
   private ambienceBase = 0.55;
+  private channelLevels: Record<BusChannel, number> = {
+    sfx: 0.95,
+    music: 0.42,
+    ambience: 0.55,
+    radio: 0.72,
+    warn: 0.88,
+  };
 
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
+
+    this.limiter = ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = -8;
+    this.limiter.knee.value = 12;
+    this.limiter.ratio.value = 8;
+    this.limiter.attack.value = 0.003;
+    this.limiter.release.value = 0.18;
+    this.limiter.connect(ctx.destination);
+
     this.master = ctx.createGain();
     this.master.gain.value = this.masterTarget;
-    this.master.connect(ctx.destination);
+    this.master.connect(this.limiter);
 
     this.sfx = ctx.createGain();
-    this.sfx.gain.value = 0.95;
+    this.sfx.gain.value = this.channelLevels.sfx;
     this.sfx.connect(this.master);
 
     this.music = ctx.createGain();
-    this.music.gain.value = this.musicBase;
+    this.music.gain.value = this.channelLevels.music;
     this.music.connect(this.master);
 
     this.ambience = ctx.createGain();
-    this.ambience.gain.value = this.ambienceBase;
+    this.ambience.gain.value = this.channelLevels.ambience;
     this.ambience.connect(this.master);
 
     this.radio = ctx.createGain();
-    this.radio.gain.value = 0.7;
+    this.radio.gain.value = this.channelLevels.radio;
     this.radio.connect(this.master);
 
     this.warn = ctx.createGain();
-    this.warn.gain.value = 0.85;
+    this.warn.gain.value = this.channelLevels.warn;
     this.warn.connect(this.master);
+
+    this.musicBase = this.channelLevels.music;
+    this.ambienceBase = this.channelLevels.ambience;
   }
 
   channel(name: BusChannel): GainNode {
@@ -60,6 +80,36 @@ export class AudioBus {
         return this.radio;
       case 'warn':
         return this.warn;
+    }
+  }
+
+  /** Per-channel user volume 0…1 (pre-duck). */
+  setChannelLevel(name: BusChannel, level: number) {
+    const v = Math.max(0, Math.min(1, level));
+    this.channelLevels[name] = v;
+    if (name === 'music') {
+      this.musicBase = v;
+      this.applyDuck(this.ctx.currentTime);
+      return;
+    }
+    if (name === 'ambience') {
+      this.ambienceBase = v;
+      this.applyDuck(this.ctx.currentTime);
+      return;
+    }
+    const now = this.ctx.currentTime;
+    this.channel(name).gain.setTargetAtTime(v, now, 0.04);
+  }
+
+  getChannelLevel(name: BusChannel): number {
+    return this.channelLevels[name];
+  }
+
+  setMasterLevel(level: number) {
+    this.masterTarget = Math.max(0, Math.min(1, level));
+    if (!this.muted) {
+      const now = this.ctx.currentTime;
+      this.master.gain.setTargetAtTime(this.masterTarget, now, 0.04);
     }
   }
 
@@ -96,11 +146,13 @@ export class AudioBus {
 
   setMusicBase(level: number) {
     this.musicBase = level;
+    this.channelLevels.music = level;
     this.applyDuck(this.ctx.currentTime);
   }
 
   setAmbienceBase(level: number) {
     this.ambienceBase = level;
+    this.channelLevels.ambience = level;
     this.applyDuck(this.ctx.currentTime);
   }
 

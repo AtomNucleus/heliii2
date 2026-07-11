@@ -12,4 +12,8 @@ export type {
   SpatialPoint,
   FlybyCandidate,
   Vec3Like,
+  AudioMissionEvent,
+  RadioCaption,
+  RadioCaptionListener,
+  BusChannel,
 } from './gameAudio';

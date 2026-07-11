@@ -1,11 +1,12 @@
 import type { AudioBus } from './bus';
 import type { RadioCue } from './types';
+import type { RadioCaptionListener } from './events';
 import { createNoiseBuffer, hashString } from './util';
 import { playTone } from './synth';
 
 /**
  * Synthesized radio chatter — band-limited noise bursts + formant beeps.
- * Optional text seed drives syllable rhythm (nonverbal / text-driven cues).
+ * Optional text seed drives syllable rhythm; captions emit for HUD text-radio.
  */
 export class RadioChatter {
   private bus: AudioBus | null = null;
@@ -13,9 +14,17 @@ export class RadioChatter {
   private hiss: AudioBufferSourceNode | null = null;
   private hissGain: GainNode | null = null;
   private hissFilter: BiquadFilterNode | null = null;
+  private captionListeners: RadioCaptionListener[] = [];
 
   attach(bus: AudioBus) {
     this.bus = bus;
+  }
+
+  onCaption(listener: RadioCaptionListener) {
+    this.captionListeners.push(listener);
+    return () => {
+      this.captionListeners = this.captionListeners.filter((l) => l !== listener);
+    };
   }
 
   /** Soft carrier hiss while flight is active. */
@@ -62,25 +71,30 @@ export class RadioChatter {
     const bus = this.bus;
     if (!bus) return;
     const now = bus.ctx.currentTime;
-    if (now - this.lastCueAt < 0.35) return;
+    if (now - this.lastCueAt < 0.32) return;
     this.lastCueAt = now;
+
+    bus.duck(0.18, 0.25);
 
     // Key-up click
     playTone(bus, {
       type: 'square',
       freq: 2400,
       freqEnd: 900,
-      gain: 0.04,
+      gain: 0.045,
       duration: 0.03,
       channel: 'radio',
     });
 
-    const seed = hashString(textHint ?? cue);
+    const caption = textHint ?? this.defaultCaption(cue);
+    this.emitCaption(cue, caption);
+
+    const seed = hashString(caption);
     const pattern = this.patternFor(cue, seed);
     this.speakPattern(pattern, seed);
 
     // Tail static
-    this.staticBurst(0.08 + (seed % 5) * 0.01, 0.05, 0.12 + pattern.length * 0.05);
+    this.staticBurst(0.08 + (seed % 5) * 0.01, 0.055, 0.12 + pattern.length * 0.05);
   }
 
   /** Speak arbitrary short text as syllable beeps (callsigns, toasts). */
@@ -90,8 +104,43 @@ export class RadioChatter {
     this.playCue('weapons-free', cleaned);
   }
 
+  private emitCaption(cue: RadioCue | 'text', text: string) {
+    const payload = { text, cue, atMs: performance.now() };
+    for (const listener of this.captionListeners) {
+      try {
+        listener(payload);
+      } catch {
+        // ignore listener errors
+      }
+    }
+  }
+
+  private defaultCaption(cue: RadioCue): string {
+    switch (cue) {
+      case 'mission-start':
+        return 'STRIKE RUN GO';
+      case 'weapons-free':
+        return 'WEAPONS FREE';
+      case 'target-down':
+        return 'SPLASH ONE';
+      case 'depot-down':
+        return 'DEPOT DOWN';
+      case 'hull-critical':
+        return 'HULL CRITICAL';
+      case 'near-miss':
+        return 'NEAR MISS';
+      case 'bingo':
+        return 'BINGO FUEL';
+      case 'mission-complete':
+        return 'MISSION COMPLETE';
+      case 'mayday':
+        return 'MAYDAY MAYDAY';
+      default:
+        return 'COPY';
+    }
+  }
+
   private patternFor(cue: RadioCue, seed: number): number[] {
-    // Relative syllable lengths / emphasis
     switch (cue) {
       case 'mission-start':
         return [1, 1, 1.4, 0.8, 1.2];
@@ -124,35 +173,40 @@ export class RadioChatter {
     pattern.forEach((len, i) => {
       const formant = base + (i % 3) * 90 + ((seed >> (i + 1)) % 5) * 18;
       const dur = 0.05 + len * 0.055;
-      // Noise syllable
-      this.syllable(formant, dur, t, 0.07 + len * 0.02);
-      // Tone carrier
+      this.syllable(formant, dur, t, 0.075 + len * 0.02);
       playTone(bus, {
         type: i % 2 === 0 ? 'sawtooth' : 'square',
         freq: formant,
         freqEnd: formant * (0.92 + (seed % 4) * 0.02),
-        gain: 0.045,
+        gain: 0.048,
         duration: dur,
         delay: t,
         channel: 'radio',
       });
-      // Second formant
       playTone(bus, {
         type: 'sine',
         freq: formant * 1.6,
-        gain: 0.025,
+        gain: 0.028,
         duration: dur * 0.85,
         delay: t + 0.01,
         channel: 'radio',
       });
+      // Soft third formant for radio grit
+      playTone(bus, {
+        type: 'triangle',
+        freq: formant * 2.3,
+        gain: 0.015,
+        duration: dur * 0.6,
+        delay: t + 0.015,
+        channel: 'radio',
+      });
       t += dur + 0.035;
     });
-    // Unkey click
     playTone(bus, {
       type: 'square',
       freq: 1800,
       freqEnd: 400,
-      gain: 0.03,
+      gain: 0.032,
       duration: 0.025,
       delay: t,
       channel: 'radio',
