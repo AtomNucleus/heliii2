@@ -2,18 +2,29 @@
 
 Browser-based low-poly helicopter arcade game built with **Three.js**, **TypeScript**, and **Vite**.
 
-Fly a neon course over the **Fruzer Polygon** map (Chicken Gun–style battle-royale island).
+Fly a neon strike run over the **Fruzer Polygon** map (Chicken Gun–style battle-royale island).
+
+## Project status
+
+TypeScript / Three.js / Vite game sources are in place. This branch adds project foundation: npm scripts for lint/format/test, GitHub Actions CI, and a Playwright Chromium smoke test against the production build.
 
 ## Play
 
-**Live:** https://tranquil-marshmallow-94dc37.netlify.app  
+**Live:** https://tranquil-marshmallow-94dc37.netlify.app
 
 Public deploy (no password). Claim it into your Netlify account soon so it is not suspended — see `NETLIFY_DEPLOY.md`.
 
-## Run locally
+## Install
 
 ```bash
-npm install
+npm ci
+```
+
+(`npm install` also works for local development.)
+
+## Develop
+
+```bash
 npm run dev
 ```
 
@@ -25,6 +36,39 @@ Open the URL Vite prints (default `http://localhost:5173`).
 npm run build
 ```
 
+Preview the production build:
+
+```bash
+npm run preview
+```
+
+## Lint and format
+
+```bash
+npm run lint
+npm run format:check
+```
+
+Prettier is configured for configs, scripts, e2e, docs, and the HTML shell. `src/` is ignored for now to avoid large style-only diffs while other workstreams land.
+
+## Test
+
+```bash
+npm test                 # unit + verification scripts
+npm run test:unit        # Node unit tests (combat AI)
+npm run test:collision   # collision math verification
+npm run test:mission     # mission authoring verification
+npm run smoke-test       # Playwright Chromium smoke (needs build + browser)
+```
+
+First-time Playwright setup (local):
+
+```bash
+npx playwright install chromium
+```
+
+CI installs Chromium automatically via GitHub Actions.
+
 ## Deploy (Netlify)
 
 ```bash
@@ -32,7 +76,7 @@ npm run build
 npx netlify deploy --dir dist --prod
 ```
 
-`netlify.toml` publishes `dist` after `npm run build`.
+`netlify.toml` publishes `dist` after `npm run build`. See `NETLIFY_DEPLOY.md` for claim/redeploy notes (no credentials stored in-repo).
 
 ## Map credit
 

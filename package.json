@@ -7,14 +7,26 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "tsx --test src/combat/ai/ai.test.ts",
+    "lint": "eslint .",
+    "format:check": "prettier --check .",
+    "test": "npm run test:unit && npm run test:verify",
+    "test:unit": "tsx --test src/combat/ai/ai.test.ts",
     "test:ai": "tsx --test src/combat/ai/ai.test.ts",
-    "test:collision": "node scripts/verify-collision.mjs"
+    "test:collision": "node scripts/verify-collision.mjs",
+    "test:mission": "node scripts/verify-mission.mjs",
+    "test:verify": "npm run test:collision && npm run test:mission",
+    "smoke-test": "playwright test"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
     "@types/three": "^0.170.0",
+    "eslint": "^10.7.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.5",
     "tsx": "^4.23.0",
     "typescript": "~5.6.3",
+    "typescript-eslint": "^8.63.0",
     "vite": "^6.0.3"
   },
   "dependencies": {

@@ -10,14 +10,16 @@ Fruzer Polygon map build. Deployed with `--allow-anonymous --created-via cli` (n
 
 ### Claim into your Netlify account (recommended)
 
-Anonymous sites can be suspended if left unclaimed. Claim within ~1 hour:
+Anonymous sites can be suspended if left unclaimed. Claim within ~1 hour of an anonymous deploy:
 
 1. Log in: `netlify login`
-2. Run:
+2. Claim the site (use your own Netlify auth — do not commit tokens):
    ```bash
-   netlify claim --site 1bdd98ed-155f-4021-9603-fcf362fe384f --token eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM2MDU4MTIsImV4cCI6MTc4MzYwOTQxMiwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJkZmUxZWU5Zi0yOGZkLTRjN2UtYmMzYi1hMDhhODdjNzFmYTUifQ.Yp3ktcKXoSvLlt1X5b232F0q4viSdm1Vx1v5JVcBTZY
+   netlify claim --site 1bdd98ed-155f-4021-9603-fcf362fe384f
    ```
-3. Or open: https://app.netlify.com/drop/tranquil-marshmallow-94dc37#drop_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3ODM2MDU4MTIsImV4cCI6MTc4MzYwOTQxMiwiaXNzIjoiTmV0bGlmeSIsInNlc3Npb25faWQiOiJkZmUxZWU5Zi0yOGZkLTRjN2UtYmMzYi1hMDhhODdjNzFmYTUifQ.Yp3ktcKXoSvLlt1X5b232F0q4viSdm1Vx1v5JVcBTZY
+3. Or open the Netlify Drop claim UI for the site slug `tranquil-marshmallow-94dc37` while logged in, and follow the claim prompt shown in the Netlify dashboard.
+
+> **Security note:** Never commit Netlify session JWTs, drop tokens, or personal access tokens. If a token was previously shared in this file, treat it as compromised and rely on `netlify login` instead.
 
 ### Redeploy (public, no password)
 

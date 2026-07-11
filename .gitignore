@@ -11,6 +11,12 @@ dist
 dist-ssr
 *.local
 
+# Playwright
+playwright-report
+test-results
+blob-report
+playwright/.cache
+
 # Netlify CLI local state
 .netlify
 

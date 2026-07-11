@@ -14,9 +14,7 @@ const strikeSrc = readFileSync(join(root, 'src/mission/strikeMission.ts'), 'utf8
 const directorSrc = readFileSync(join(root, 'src/mission/director.ts'), 'utf8');
 const mainSrc = readFileSync(join(root, 'src/main.ts'), 'utf8');
 
-const paceMatches = [...phasesSrc.matchAll(/paceMinutes:\s*([0-9.]+)/g)].map((m) =>
-  Number(m[1]),
-);
+const paceMatches = [...phasesSrc.matchAll(/paceMinutes:\s*([0-9.]+)/g)].map((m) => Number(m[1]));
 const paceSum = paceMatches.reduce((a, b) => a + b, 0);
 const phaseIds = [...phasesSrc.matchAll(/id:\s*'([a-zA-Z]+)'/g)].map((m) => m[1]);
 
@@ -26,20 +24,35 @@ function assert(name, cond, detail = '') {
   checks.push({ name, ok: !!cond, detail });
 }
 
-assert('has 8 authored phases', phaseIds.length === 8, `got ${phaseIds.length}: ${phaseIds.join(',')}`);
 assert(
-  'design pace is 8–11 minutes',
-  paceSum >= 8 && paceSum <= 11,
-  `sum=${paceSum}`,
+  'has 8 authored phases',
+  phaseIds.length === 8,
+  `got ${phaseIds.length}: ${phaseIds.join(',')}`,
 );
+assert('design pace is 8–11 minutes', paceSum >= 8 && paceSum <= 11, `sum=${paceSum}`);
 assert('grade helpers present', /gradeFromRun|loadBestScore|saveBestScore/.test(gradeSrc));
-assert('strike mission has checkpoints', /saveCheckpoint|checkpointsUsed|STARTING_LIVES/.test(strikeSrc));
+assert(
+  'strike mission has checkpoints',
+  /saveCheckpoint|checkpointsUsed|STARTING_LIVES/.test(strikeSrc),
+);
 assert('strike mission has radio', /RadioChatter|RADIO_SCRIPTS/.test(strikeSrc));
-assert('strike mission has waves/setpieces', /spawnRetaliationWave|setpiece|spawnConvoy|spawnCommandBunker/.test(strikeSrc));
-assert('mission director state machine', /MissionDirector|OPERATION_ACTS|softNudge|onCheckpointRecover/.test(directorSrc));
+assert(
+  'strike mission has waves/setpieces',
+  /spawnRetaliationWave|setpiece|spawnConvoy|spawnCommandBunker/.test(strikeSrc),
+);
+assert(
+  'mission director state machine',
+  /MissionDirector|OPERATION_ACTS|softNudge|onCheckpointRecover/.test(directorSrc),
+);
 assert('three-act framing', /ACT I|ACT II|ACT III|INFILTRATION|ESCALATION/.test(directorSrc));
-assert('main integrates StrikeMission', /StrikeMission/.test(mainSrc) && /updateStrike|showRadio/.test(mainSrc));
-assert('main stays thin on mission logic', !/spawnFirstStrikeDepots|OPERATION_PHASES|MissionDirector/.test(mainSrc));
+assert(
+  'main integrates StrikeMission',
+  /StrikeMission/.test(mainSrc) && /updateStrike|showRadio/.test(mainSrc),
+);
+assert(
+  'main stays thin on mission logic',
+  !/spawnFirstStrikeDepots|OPERATION_PHASES|MissionDirector/.test(mainSrc),
+);
 
 const failed = checks.filter((c) => !c.ok);
 for (const c of checks) {

@@ -1,0 +1,10 @@
+dist
+node_modules
+package-lock.json
+public
+playwright-report
+test-results
+
+# Game sources keep existing style for now to avoid merge churn with parallel workstreams.
+# Prettier still applies to configs, scripts, e2e, docs, and HTML shell.
+src

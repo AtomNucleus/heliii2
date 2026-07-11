@@ -190,7 +190,7 @@ const box = { minX: -2, minY: 0, minZ: -2, maxX: 2, maxY: 10, maxZ: 2 };
 
 // Spatial hash key uniqueness + inactive skip + procedural add
 {
-  const cellSize = 12;
+  const _cellSize = 12; // documents intended hash cell size for this smoke block
   const key = (ix, iz) => ((ix + 0x8000) & 0xffff) | (((iz + 0x8000) & 0xffff) << 16);
   const a = key(0, 0);
   const b = key(1, 0);
@@ -207,7 +207,15 @@ const box = { minX: -2, minY: 0, minZ: -2, maxX: 2, maxY: 10, maxZ: 2 };
   ids = hash.queryIds(-1, 5, -1, 5);
   assert(!ids.includes(0), 'inactive collider skipped');
   const pid = hash.addCollider({
-    minX: 1, minY: 0, minZ: 1, maxX: 2, maxY: 2, maxZ: 2, kind: 'prop', hp: 20, maxHp: 20,
+    minX: 1,
+    minY: 0,
+    minZ: 1,
+    maxX: 2,
+    maxY: 2,
+    maxZ: 2,
+    kind: 'prop',
+    hp: 20,
+    maxHp: 20,
   });
   assert(pid === 2, 'procedural id');
   ids = hash.queryIds(-1, 5, -1, 5);

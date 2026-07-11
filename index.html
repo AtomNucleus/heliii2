@@ -1,10 +1,13 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#061018" />
-    <meta name="description" content="HELI SUNSET — neon arcade helicopter strike run over Fruzer Polygon." />
+    <meta
+      name="description"
+      content="HELI SUNSET — neon arcade helicopter strike run over Fruzer Polygon."
+    />
     <title>HELI SUNSET — Strike Run</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
@@ -37,7 +40,14 @@
               <span class="hud-label">HULL</span>
               <span id="hud-health-text" class="hud-health-text">100</span>
             </div>
-            <div class="hud-health-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-label="Hull integrity">
+            <div
+              class="hud-health-track"
+              role="progressbar"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="100"
+              aria-label="Hull integrity"
+            >
               <div id="hud-health-fill" class="hud-health-fill"></div>
             </div>
           </div>
@@ -95,7 +105,14 @@
           <span id="hud-mission-title" class="hud-mission-title">DESTROY SUPPLY DEPOTS</span>
           <span id="hud-mission-detail" class="hud-mission-detail">Primary targets remaining</span>
           <div class="hud-mission-progress">
-            <div class="hud-mission-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Mission progress">
+            <div
+              class="hud-mission-track"
+              role="progressbar"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+              aria-label="Mission progress"
+            >
               <div id="hud-mission-fill" class="hud-mission-fill"></div>
             </div>
             <span id="hud-mission-count" class="hud-mission-count">0/0</span>
@@ -103,7 +120,13 @@
         </div>
       </div>
 
-      <div id="start-overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="start-title">
+      <div
+        id="start-overlay"
+        class="overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="start-title"
+      >
         <div class="overlay-atmosphere" aria-hidden="true"></div>
         <div class="overlay-panel">
           <p class="brand-eyebrow">ARCADE FLIGHT</p>
@@ -112,7 +135,9 @@
             <span class="title-sunset">SUNSET</span>
           </h1>
           <p class="subtitle">Operation SUNSET · Fruzer Polygon</p>
-          <p id="loading-status" class="loading-status" aria-live="polite">Loading Fruzer Polygon map…</p>
+          <p id="loading-status" class="loading-status" aria-live="polite">
+            Loading Fruzer Polygon map…
+          </p>
 
           <div class="mission-brief">
             <div class="mission-brief-header">
@@ -121,8 +146,8 @@
             </div>
             <p class="mission-brief-copy">
               Eight-phase, three-act strike across Fruzer Polygon (~8–10 min). Act I infiltration,
-              Act II escalation (gauntlet · convoy · drones), Act III bunker climax and exfil.
-              Rings heal and feed combo. Checkpoints recover hull — chase grade S on replay.
+              Act II escalation (gauntlet · convoy · drones), Act III bunker climax and exfil. Rings
+              heal and feed combo. Checkpoints recover hull — chase grade S on replay.
             </p>
           </div>
 
@@ -164,7 +189,10 @@
               >Chicken Gun Fruzer — Polygon</a
             >
             by
-            <a href="https://sketchfab.com/amogusstrikesback2" target="_blank" rel="noopener noreferrer"
+            <a
+              href="https://sketchfab.com/amogusstrikesback2"
+              target="_blank"
+              rel="noopener noreferrer"
               >amogusstrikesback2</a
             >
             · CC Attribution
@@ -172,7 +200,13 @@
         </div>
       </div>
 
-      <div id="complete-overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="end-title">
+      <div
+        id="complete-overlay"
+        class="overlay hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="end-title"
+      >
         <div class="overlay-atmosphere overlay-atmosphere-win" aria-hidden="true"></div>
         <div id="end-panel" class="overlay-panel">
           <h1 class="title" id="end-title">MISSION COMPLETE</h1>
@@ -198,7 +232,12 @@
       </div>
 
       <div id="mobile-controls" class="mobile-controls hidden" aria-hidden="true">
-        <button id="mobile-restart" class="mobile-restart" type="button" aria-label="Restart flight">
+        <button
+          id="mobile-restart"
+          class="mobile-restart"
+          type="button"
+          aria-label="Restart flight"
+        >
           RST
         </button>
 
@@ -217,7 +256,12 @@
         </div>
 
         <div class="mobile-altitude-zone" aria-label="Altitude and boost">
-          <button class="mobile-altitude-button" type="button" data-mobile-input="up" aria-label="Ascend">
+          <button
+            class="mobile-altitude-button"
+            type="button"
+            data-mobile-input="up"
+            aria-label="Ascend"
+          >
             ASC
           </button>
           <button
