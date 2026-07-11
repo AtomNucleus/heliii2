@@ -22,7 +22,8 @@ import {
   bunkerHealthRatio,
   type WaveContext,
 } from './waves';
-import { gradeFromRun, loadBestScore, saveBestScore, previewGrade } from './grade';
+import { gradeFromRun, loadBestScore, previewGrade } from './grade';
+import { dailyGradePoints, getDailyChallenge } from '../profile';
 import type {
   PhaseId,
   PhaseHudState,
@@ -84,6 +85,9 @@ export class StrikeMission {
   private objectiveTargetsLeft = 0;
   private objectiveTargetsTotal = 0;
   private phaseDetail = '';
+  private completedPhaseIds: PhaseId[] = [];
+  private phaseEnterAt = 0;
+  private phaseTimes: Partial<Record<PhaseId, number>> = {};
 
   constructor(
     scene: THREE.Scene,
@@ -104,11 +108,14 @@ export class StrikeMission {
 
     this.director.onTransition((ev) => {
       if (ev.type === 'phaseEnter') {
+        this.phaseEnterAt = this.elapsed;
         this.applyPhaseEnter(ev.phaseId, ev.isMissionStart, ev.act.id);
       } else if (ev.type === 'softNudge') {
         this.radio.say(RADIO_SCRIPTS.softNudge(ev.phaseId));
       } else if (ev.type === 'phaseComplete') {
         this.scoring.addFlat(ev.bonus);
+        this.completedPhaseIds.push(ev.phaseId);
+        this.phaseTimes[ev.phaseId] = Math.max(0, this.elapsed - this.phaseEnterAt);
         this.emit({
           type: 'toast',
           message: `${ev.def.title} COMPLETE · +${ev.bonus}`,
@@ -198,6 +205,9 @@ export class StrikeMission {
     this.lastActId = 0;
     this.checkpointLabel = null;
     this.checkpointPos.copy(this.layoutOpts.spawn);
+    this.completedPhaseIds = [];
+    this.phaseEnterAt = 0;
+    this.phaseTimes = {};
     this.waveCtx = makeWaveContext(this.layoutOpts);
 
     this.health.reset();
@@ -862,6 +872,14 @@ export class StrikeMission {
     }
 
     const finalScore = this.scoring.getSnapshot().score;
+    const daily = getDailyChallenge();
+    const dailyPoints = dailyGradePoints(daily, {
+      outcome,
+      score: finalScore,
+      time: this.elapsed,
+      bestCombo: snap.bestCombo,
+      checkpointsUsed: this.checkpointsUsed,
+    });
     const grade = gradeFromRun({
       outcome,
       score: finalScore,
@@ -871,9 +889,11 @@ export class StrikeMission {
       phasesCompleted: this.director.completedCount,
       phaseTotal: this.director.phaseTotal,
       checkpointsUsed: this.checkpointsUsed,
+      dailyPoints,
     });
-    const { best, isNewBest } = saveBestScore(outcome === 'won' ? finalScore : 0);
-    const displayBest = Math.max(best, loadBestScore());
+    // Best-score persistence (bonus-inclusive + NEW BEST) is owned by main.finishMission
+    // via recordRun so daily/loadout bonuses are included. Mirror current stored best for HUD.
+    const displayBest = loadBestScore();
 
     this.lastSummary = {
       outcome,
@@ -888,7 +908,13 @@ export class StrikeMission {
       phasesCompleted: this.director.completedCount,
       checkpointsUsed: this.checkpointsUsed,
       bestScore: displayBest,
-      isNewBest: outcome === 'won' && isNewBest,
+      isNewBest: false,
+      completedPhaseIds: [...this.completedPhaseIds],
+      phaseTimes: { ...this.phaseTimes },
+      dailyId: daily.id,
+      dailyLabel: daily.label,
+      dailyBonus: 0,
+      loadoutBonus: 0,
     };
   }
 }

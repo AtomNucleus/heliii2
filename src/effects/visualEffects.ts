@@ -49,6 +49,7 @@ export class VisualEffects {
   private readonly sceneSetup: SceneSetup;
   private readonly unsub: () => void;
   private readonly sunDir = new THREE.Vector3(0.55, 0.28, -0.45).normalize();
+  private reducedMotion = false;
 
   constructor(sceneSetup: SceneSetup) {
     this.sceneSetup = sceneSetup;
@@ -79,17 +80,33 @@ export class VisualEffects {
   }
 
   applyQuality(q: QualitySettings) {
-    this.sceneSetup.applyQuality(q);
-    this.post.applyQuality(q);
-    this.exhaust.applyQuality(q);
-    this.trail.applyQuality(q);
-    this.speedFx.applyQuality(q);
-    this.atmosphere.applyQuality(q);
-    this.dressing.applyQuality(q);
-    this.rotor.applyQuality(q);
-    this.lightShafts.applyQuality(q);
-    this.contactShadow.applyQuality(q);
-    this.waterResponse.applyQuality(q);
+    const effective: QualitySettings = this.reducedMotion
+      ? {
+          ...q,
+          filmGrain: false,
+          chromaticAberration: false,
+          speedLineCount: Math.min(q.speedLineCount, 4),
+          bloomStrength: Math.min(q.bloomStrength, 0.12),
+        }
+      : q;
+    this.sceneSetup.applyQuality(effective);
+    this.post.applyQuality(effective);
+    this.exhaust.applyQuality(effective);
+    this.trail.applyQuality(effective);
+    this.speedFx.applyQuality(effective);
+    this.atmosphere.applyQuality(effective);
+    this.dressing.applyQuality(effective);
+    this.rotor.applyQuality(effective);
+    this.lightShafts.applyQuality(effective);
+    this.contactShadow.applyQuality(effective);
+    this.waterResponse.applyQuality(effective);
+  }
+
+  /** Reduce camera-adjacent speed FX / film / chromatic when reduced motion is on. */
+  setReducedMotion(active: boolean) {
+    if (this.reducedMotion === active) return;
+    this.reducedMotion = active;
+    this.applyQuality(this.quality.current);
   }
 
   update(ctx: VisualEffectsUpdateContext) {
@@ -105,11 +122,14 @@ export class VisualEffects {
       time,
       waterY,
     } = ctx;
-    this.quality.update(dt);
+    this.quality.update(this.reducedMotion ? 0 : dt);
 
     const boostMul = boosting ? 1.35 : 1;
     const speed01 = Math.min(1, Math.max(0, (speed - 10) / 45)) * boostMul;
-    this.post.setSpeedIntensity(Math.min(1, speed01 + (shake ?? 0) * 0.25));
+    const speedIntensity = this.reducedMotion
+      ? Math.min(0.15, speed01 * 0.2)
+      : Math.min(1, speed01 + (shake ?? 0) * 0.25);
+    this.post.setSpeedIntensity(speedIntensity);
     this.post.update(dt);
 
     this.sceneSetup.updateAtmosphere(dt, altitude, speed);
@@ -122,7 +142,7 @@ export class VisualEffects {
       this.sceneSetup.camera,
       heliPos,
       heliQuat,
-      speed * (boosting ? 1.3 : 1),
+      this.reducedMotion ? Math.min(speed, 12) : speed * (boosting ? 1.3 : 1),
     );
     this.atmosphere.update(dt, heliPos, altitude, speed, getGroundHeight);
     this.dressing.update(dt, heliPos, this.sceneSetup.camera, altitude);

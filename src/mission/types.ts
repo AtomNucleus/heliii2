@@ -86,6 +86,15 @@ export interface StrikeEndSummary extends MissionEndSummary {
   checkpointsUsed: number;
   bestScore: number;
   isNewBest: boolean;
+  /** Phase ids completed this run (for persistent accomplishments). */
+  completedPhaseIds: PhaseId[];
+  /** Per-phase clear times (seconds) recorded this run. */
+  phaseTimes?: Partial<Record<PhaseId, number>>;
+  /** Local daily challenge identity (UTC date seed) — not an online board. */
+  dailyId?: string;
+  dailyLabel?: string;
+  dailyBonus?: number;
+  loadoutBonus?: number;
 }
 
 export type StrikeMissionEvent =

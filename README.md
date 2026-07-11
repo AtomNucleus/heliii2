@@ -6,7 +6,7 @@ Fly a neon strike run over the **Fruzer Polygon** map (Chicken Gun–style battl
 
 ## Project status
 
-TypeScript / Three.js / Vite game sources are in place. This branch includes project foundation (lint/format/test/CI), Playwright smoke coverage, and production **PWA / offline** support via `vite-plugin-pwa`.
+TypeScript / Three.js / Vite game sources are in place. This branch includes project foundation (lint/format/test/CI), Playwright smoke coverage, production **PWA / offline** support via `vite-plugin-pwa`, and a **persistent progression / settings / accessibility** slice (local profile, hangar cosmetics, local daily challenge, pause/settings).
 
 ## Play
 
@@ -43,6 +43,31 @@ Preview the production build:
 ```bash
 npm run preview
 ```
+
+## Progression, settings, and accessibility
+
+Local-only player profile (no accounts, no online leaderboards):
+
+| Key                          | Purpose                                                                                |
+| ---------------------------- | -------------------------------------------------------------------------------------- |
+| `heli-sunset-profile-v1`     | Versioned JSON profile (progression, cosmetics, settings)                              |
+| `heli-sunset-op-sunset-best` | Legacy best-score mirror — imported on first load so existing players keep their score |
+
+**Progression** updates from real mission end summaries: best score / grade / time, completed runs, per-phase accomplishments, and unlock criteria.
+
+**Hangar cosmetics** (start screen → Hangar): four helicopter skins and three loadouts. Locked / unlocked / equipped state is persisted; equipped cosmetics tint the actual heli materials. Loadout “perks” are skill-gated end-run score bonuses only (not combat power).
+
+**Local daily challenge** identity is derived from the UTC calendar date (`DS-####`). A deterministic target/modifier adjusts grading points and an end-run bonus when met. UI copy labels it as local — not a global board. Authored mission scripting is not reseeded (avoids destabilizing phases).
+
+**Settings** (start screen, Esc on start, or Pause → Settings): steering sensitivity, master volume / mute, quality preference (`auto` / low / medium / high), reduced motion (`system` / on / off), high contrast, and radio captions. Changes persist and apply without interrupting an active run unexpectedly.
+
+**Accessibility**
+
+- `reducedMotion: system` follows `prefers-reduced-motion` until the player overrides
+- Reduced motion cuts camera shake, speed-line intensity, film/chromatic punch, and UI animation where practical
+- High contrast strengthens HUD / panel edges and text
+- Captions gate radio chatter text; critical objective toasts stay visible
+- Hangar / settings / pause dialogs are keyboard-focusable with ARIA labels; **Esc** / **P** pause and resume safely during flight
 
 ## PWA / offline
 
@@ -86,7 +111,8 @@ Prettier is configured for configs, scripts, e2e, docs, and the HTML shell. `src
 
 ```bash
 npm test                 # unit + verification scripts
-npm run test:unit        # Node unit tests (combat AI, render prefs, physics, PWA policy)
+npm run test:unit        # Node unit tests (AI, render, physics, PWA, profile)
+npm run test:profile     # profile validation / progression / daily / settings
 npm run test:pwa         # PWA update/install policy only
 npm run test:physics     # Rapier debris budget / fragment / lifecycle policies
 npm run test:collision   # collision math verification
@@ -127,7 +153,11 @@ Asset path: `public/maps/fruzer-polygon.glb`
 - **WASD / Arrows** — steer & move
 - **Space** — ascend
 - **Shift** — descend
+- **F / click** — fire rockets
+- **E / Q** — boost / evasive
+- **Esc / P** — pause (in flight) or settings (on start)
 - **R** — restart
+- **M** — mute
 - **Mobile / touch** — left thumb steer pad, right thumb ascend/descend buttons, small restart button during flight
 - Fly through neon rings in order (10 total)
 

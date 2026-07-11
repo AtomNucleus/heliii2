@@ -160,4 +160,57 @@ test.describe('HELI SUNSET smoke', () => {
     expect(pageErrors, `Unexpected page errors:\n${pageErrors.join('\n')}`).toEqual([]);
     expect(consoleErrors, `Unexpected console errors:\n${consoleErrors.join('\n')}`).toEqual([]);
   });
+
+  test('settings / hangar shell is keyboard-accessible and persists preferences', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { pageErrors, consoleErrors } = attachErrorCollectors(page);
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expectShellVisible(page);
+
+    await expect(page.locator('#open-settings-btn')).toBeVisible();
+    await expect(page.locator('#open-hangar-btn')).toBeVisible();
+    await expect(page.locator('#start-daily-id')).toBeAttached();
+    await expect(page.locator('#daily-challenge-desc')).toContainText(/local daily|no online/i);
+
+    await page.locator('#open-settings-btn').click();
+    const settings = page.locator('#settings-panel');
+    await expect(settings).toBeVisible();
+    await expect(settings).toHaveAttribute('role', 'dialog');
+    await expect(page.locator('#settings-title')).toBeVisible();
+
+    await page.locator('#settings-panel select[name="quality"]').selectOption('low');
+    await page.locator('#settings-panel input[name="highContrast"]').check();
+    await page.locator('#settings-close-btn').click();
+    await expect(settings).toBeHidden();
+
+    await expect(page.locator('html')).toHaveAttribute('data-quality-pref', 'low');
+    await expect(page.locator('html')).toHaveAttribute('data-high-contrast', 'on');
+    await expect(page.locator('html')).toHaveClass(/a11y-high-contrast/);
+
+    await page.locator('#open-hangar-btn').click();
+    const hangar = page.locator('#hangar-panel');
+    const metaRoot = page.locator('#meta-root');
+    await expect(hangar).toBeVisible();
+    await expect(hangar).toHaveAttribute('role', 'dialog');
+    await expect(page.locator('#skin-list .meta-choice').first()).toBeVisible();
+    await expect(page.locator('#loadout-list .meta-choice').first()).toBeVisible();
+    await expect(page.locator('#hangar-close-btn')).toBeVisible();
+    await page.locator('#hangar-close-btn').click({ force: true });
+    // Assert the shell closed (nested toBeHidden on #hangar-panel is unreliable under a [hidden] root).
+    await expect(metaRoot).toBeHidden({ timeout: 10_000 });
+    await expect(metaRoot).toHaveAttribute('data-mode', 'closed');
+    await expect(hangar).toHaveAttribute('hidden', '');
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expectShellVisible(page);
+    await expect(page.locator('html')).toHaveAttribute('data-quality-pref', 'low');
+    await expect(page.locator('html')).toHaveAttribute('data-high-contrast', 'on');
+
+    expect(pageErrors, `Unexpected page errors:\n${pageErrors.join('\n')}`).toEqual([]);
+    expect(consoleErrors, `Unexpected console errors:\n${consoleErrors.join('\n')}`).toEqual([]);
+  });
 });

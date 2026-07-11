@@ -53,6 +53,23 @@ assert(
   'main stays thin on mission logic',
   !/spawnFirstStrikeDepots|OPERATION_PHASES|MissionDirector/.test(mainSrc),
 );
+assert(
+  'profile / daily progression wired',
+  /initProfileSession|recordRun|MetaPanel|getDailyChallenge/.test(mainSrc),
+);
+assert(
+  'end summary propagates phaseTimes into recordRun',
+  /phaseTimes/.test(strikeSrc) &&
+    /phaseTimes:\s*summary\.phaseTimes|phaseTimes:\s*summary\.phaseTimes/.test(mainSrc),
+);
+assert(
+  'new best uses strict pre-record comparison',
+  /previousBest/.test(mainSrc) && /isStrictNewBest/.test(mainSrc),
+);
+assert(
+  'unlock messaging uses human-facing names',
+  /newlyUnlocked\.map\(\(u\)\s*=>\s*u\.name\)/.test(mainSrc),
+);
 
 const failed = checks.filter((c) => !c.ok);
 for (const c of checks) {

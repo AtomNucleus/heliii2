@@ -98,6 +98,7 @@ export class HUD {
   private onMuteToggle: ((muted: boolean) => void) | null = null;
   private muted = false;
   private combatHudEnabled = false;
+  private captionsEnabled = true;
 
   /** Optional hook — integration can listen for weapon-ready transitions. */
   onWeaponReadyChange: ((ready: boolean) => void) | null = null;
@@ -326,7 +327,13 @@ export class HUD {
 
   /** Radio-style narrative line (COMMAND › …). Uses toast channel. */
   showRadio(callsign: string, text: string, hold = 3.2) {
+    if (!this.captionsEnabled) return;
     this.toast(`${callsign} › ${text}`, Math.max(1.6, hold * 0.85));
+  }
+
+  /** Captions preference — objective toasts remain available via toast(). */
+  setCaptionsEnabled(enabled: boolean) {
+    this.captionsEnabled = enabled;
   }
 
   tick(dt: number) {

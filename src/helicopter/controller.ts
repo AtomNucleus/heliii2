@@ -133,6 +133,10 @@ export class HelicopterController {
   private lastProximity: ProximityWarning | null = null;
   private scrapeShakeTimer = 0;
   private scrapeNotifyCooldown = 0;
+  /** Player steering sensitivity multiplier (0.5…1.5). */
+  private steeringSensitivity = 1;
+  /** Camera shake scale (0 when reduced motion). */
+  private shakeScale = 1;
 
   private mainRotor: THREE.Object3D | null = null;
   private tailRotor: THREE.Object3D | null = null;
@@ -351,22 +355,41 @@ export class HelicopterController {
 
   /** Inject shake from external events (ring scrape, explosions, etc.). */
   addCameraShake(intensity: number) {
-    triggerCameraShake(this.camState, intensity);
+    triggerCameraShake(this.camState, intensity * this.shakeScale);
+  }
+
+  setSteeringSensitivity(value: number) {
+    this.steeringSensitivity = THREE.MathUtils.clamp(value, 0.5, 1.5);
+  }
+
+  getSteeringSensitivity(): number {
+    return this.steeringSensitivity;
+  }
+
+  /** 0 disables shake (reduced motion); 1 is default. */
+  setShakeScale(scale: number) {
+    this.shakeScale = THREE.MathUtils.clamp(scale, 0, 1);
+    if (this.shakeScale <= 0.001) {
+      this.camState.shake.trauma = 0;
+    }
   }
 
   private buildTargetAxes(): FlightAxes {
     const a = this.targetAxes;
+    const sens = this.steeringSensitivity;
 
     if (this.touchAnalog.steerY !== undefined) {
-      a.throttle = THREE.MathUtils.clamp(this.touchAnalog.steerY, -1, 1);
+      a.throttle = THREE.MathUtils.clamp(this.touchAnalog.steerY * sens, -1, 1);
     } else {
-      a.throttle = (this.input.forward ? 1 : 0) + (this.input.back ? -1 : 0);
+      a.throttle =
+        ((this.input.forward ? 1 : 0) + (this.input.back ? -1 : 0)) * sens;
     }
 
     if (this.touchAnalog.steerX !== undefined) {
-      a.turn = THREE.MathUtils.clamp(this.touchAnalog.steerX, -1, 1);
+      a.turn = THREE.MathUtils.clamp(this.touchAnalog.steerX * sens, -1, 1);
     } else {
-      a.turn = (this.input.right ? 1 : 0) + (this.input.left ? -1 : 0);
+      a.turn =
+        ((this.input.right ? 1 : 0) + (this.input.left ? -1 : 0)) * sens;
     }
 
     if (this.touchAnalog.lift !== undefined) {
@@ -386,7 +409,7 @@ export class HelicopterController {
   ) {
     if (intensity > 0.02) {
       const shakeMul = info.scrape ? 0.45 : info.crash ? 1.05 : 0.85;
-      triggerCameraShake(this.camState, intensity * shakeMul);
+      triggerCameraShake(this.camState, intensity * shakeMul * this.shakeScale);
     }
     if (damage > 0) {
       this.damage.health = Math.max(0, this.damage.health - damage);

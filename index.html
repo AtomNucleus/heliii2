@@ -175,6 +175,10 @@
               <span class="control-desc">boost / evasive</span>
             </li>
             <li>
+              <span class="control-keys"><kbd>Esc</kbd><kbd>P</kbd></span>
+              <span class="control-desc">pause / settings</span>
+            </li>
+            <li>
               <span class="control-keys"><span class="control-chip">TOUCH</span></span>
               <span class="control-desc">steer pad · ASC/DESC · FIRE · BOOST</span>
             </li>
@@ -184,8 +188,20 @@
             </li>
           </ul>
 
-          <button id="start-btn" class="neon-btn" disabled>LOADING…</button>
-          <p class="hint">or press Enter / tap start</p>
+          <div class="daily-chip" role="status" aria-live="polite">
+            <span class="daily-chip-label">LOCAL DAILY</span>
+            <span data-daily-id id="start-daily-id">DS-————</span>
+            <p id="daily-challenge-desc" class="daily-chip-desc">
+              Local daily target (UTC) — not an online leaderboard.
+            </p>
+          </div>
+
+          <div class="start-actions">
+            <button id="start-btn" class="neon-btn" disabled>LOADING…</button>
+            <button id="open-hangar-btn" class="ghost-btn" type="button">HANGAR</button>
+            <button id="open-settings-btn" class="ghost-btn" type="button">SETTINGS</button>
+          </div>
+          <p class="hint">or press Enter / tap start · Esc opens settings before flight</p>
           <p class="credit">
             Map:
             <a
@@ -203,6 +219,164 @@
             >
             · CC Attribution
           </p>
+        </div>
+      </div>
+
+      <div id="meta-root" class="meta-root" hidden data-mode="closed" aria-hidden="true">
+        <div
+          id="hangar-panel"
+          class="meta-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="hangar-title"
+          hidden
+        >
+          <header class="meta-header">
+            <h2 id="hangar-title">Hangar</h2>
+            <button
+              type="button"
+              id="hangar-close-btn"
+              class="meta-close"
+              aria-label="Close hangar"
+            >
+              Close
+            </button>
+          </header>
+          <p class="meta-lead">
+            Cosmetics apply to your helicopter. Loadout bonuses are skill-gated score extras — not
+            combat power.
+          </p>
+          <div class="meta-stats" aria-label="Career stats">
+            <div>
+              <span class="meta-stat-label">Best</span> <span id="profile-best-score">0</span>
+            </div>
+            <div>
+              <span class="meta-stat-label">Grade</span> <span id="profile-best-grade">—</span>
+            </div>
+            <div>
+              <span class="meta-stat-label">Wins/Runs</span> <span id="profile-runs">0/0</span>
+            </div>
+            <div>
+              <span class="meta-stat-label">Daily</span>
+              <span data-daily-id>DS-————</span>
+            </div>
+          </div>
+          <h3 class="meta-sub">Skins</h3>
+          <div
+            id="skin-list"
+            class="meta-choice-grid"
+            role="group"
+            aria-label="Helicopter skins"
+          ></div>
+          <h3 class="meta-sub">Loadouts</h3>
+          <div
+            id="loadout-list"
+            class="meta-choice-grid"
+            role="group"
+            aria-label="Loadout packages"
+          ></div>
+          <h3 class="meta-sub">Phase accomplishments</h3>
+          <ul id="phase-progress-list" class="phase-progress-list"></ul>
+        </div>
+
+        <div
+          id="settings-panel"
+          class="meta-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-title"
+          hidden
+        >
+          <header class="meta-header">
+            <h2 id="settings-title">Settings</h2>
+            <button
+              type="button"
+              id="settings-close-btn"
+              class="meta-close"
+              aria-label="Close settings"
+            >
+              Close
+            </button>
+          </header>
+          <form id="settings-form" class="settings-form" onsubmit="return false;">
+            <label class="settings-row">
+              <span>Steering sensitivity <span id="sensitivity-value">1.00</span></span>
+              <input
+                name="steeringSensitivity"
+                type="range"
+                min="0.5"
+                max="1.5"
+                step="0.05"
+                value="1"
+                aria-valuemin="0.5"
+                aria-valuemax="1.5"
+              />
+            </label>
+            <label class="settings-row">
+              <span>Master volume <span id="volume-value">88%</span></span>
+              <input
+                name="masterVolume"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value="0.88"
+                aria-valuemin="0"
+                aria-valuemax="1"
+              />
+            </label>
+            <label class="settings-row settings-row-check">
+              <span>Mute audio</span>
+              <input name="muted" type="checkbox" />
+            </label>
+            <label class="settings-row">
+              <span>Quality</span>
+              <select name="quality" aria-label="Quality preference">
+                <option value="auto">Auto</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="settings-row">
+              <span>Reduced motion</span>
+              <select name="reducedMotion" aria-label="Reduced motion preference">
+                <option value="system">System default</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+            <label class="settings-row settings-row-check">
+              <span>High contrast HUD</span>
+              <input name="highContrast" type="checkbox" />
+            </label>
+            <label class="settings-row settings-row-check">
+              <span>Radio captions</span>
+              <input name="captions" type="checkbox" checked />
+            </label>
+            <p class="settings-note">
+              Reduced motion follows your OS until you override it. Captions hide radio chatter text
+              only — objective toasts stay visible.
+            </p>
+          </form>
+        </div>
+
+        <div
+          id="pause-panel"
+          class="meta-panel meta-panel-pause"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pause-title"
+          hidden
+        >
+          <header class="meta-header">
+            <h2 id="pause-title">Paused</h2>
+          </header>
+          <p class="meta-lead">Mission clock held. Esc or Resume to continue.</p>
+          <div class="pause-actions">
+            <button type="button" id="pause-resume-btn" class="neon-btn">RESUME</button>
+            <button type="button" id="pause-settings-btn" class="ghost-btn">SETTINGS</button>
+          </div>
         </div>
       </div>
 

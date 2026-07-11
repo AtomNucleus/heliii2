@@ -130,6 +130,8 @@ export class AdaptiveQuality {
   private frameMsEma = 16.7;
   private settleTimer = 0;
   private readonly listeners = new Set<(s: QualitySettings) => void>();
+  /** When set, adaptive stepping is disabled and tier stays locked. */
+  private locked: QualityTier | null = null;
 
   /** Target ~55fps before stepping down; ~58fps before stepping up */
   private readonly downMs = 22;
@@ -162,8 +164,22 @@ export class AdaptiveQuality {
     for (const fn of this.listeners) fn(this.settings);
   }
 
+  /**
+   * Lock to a fixed tier, or pass null for auto adaptive.
+   * Does not interrupt mid-frame; applies on next setTier/update.
+   */
+  setPreference(pref: QualityTier | 'auto') {
+    if (pref === 'auto') {
+      this.locked = null;
+      return;
+    }
+    this.locked = pref;
+    this.setTier(pref);
+  }
+
   /** Call once per frame with clamped dt (seconds). */
   update(dt: number) {
+    if (this.locked) return;
     const ms = Math.min(dt * 1000, 50);
     this.frameMsEma = this.frameMsEma * 0.92 + ms * 0.08;
     this.settleTimer = Math.max(0, this.settleTimer - dt);
@@ -171,9 +187,9 @@ export class AdaptiveQuality {
 
     const idx = TIER_ORDER.indexOf(this.tier);
     if (this.frameMsEma > this.downMs && idx > 0) {
-      this.setTier(TIER_ORDER[idx - 1]);
+      this.setTier(TIER_ORDER[idx - 1]!);
     } else if (this.frameMsEma < this.upMs && idx < TIER_ORDER.length - 1) {
-      this.setTier(TIER_ORDER[idx + 1]);
+      this.setTier(TIER_ORDER[idx + 1]!);
     }
   }
 }

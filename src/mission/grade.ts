@@ -2,29 +2,26 @@
 
 import { PHASE_PAR_SECONDS } from './phases';
 import type { StrikeEndSummary } from './types';
+import { getBestScore, noteBestScore } from '../profile/session';
+import { LEGACY_BEST_SCORE_KEY } from '../profile/types';
 
-const BEST_SCORE_KEY = 'heli-sunset-op-sunset-best';
+/** @deprecated Prefer PROFILE_STORAGE_KEY — kept for imports/tests. */
+export const BEST_SCORE_KEY = LEGACY_BEST_SCORE_KEY;
 
 export function loadBestScore(): number {
   try {
-    const raw = localStorage.getItem(BEST_SCORE_KEY);
-    if (!raw) return 0;
-    const n = Number(raw);
-    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+    return getBestScore();
   } catch {
     return 0;
   }
 }
 
 export function saveBestScore(score: number): { best: number; isNewBest: boolean } {
-  const prev = loadBestScore();
-  const best = Math.max(prev, Math.floor(score));
   try {
-    localStorage.setItem(BEST_SCORE_KEY, String(best));
+    return noteBestScore(score);
   } catch {
-    /* ignore quota / private mode */
+    return { best: Math.max(0, Math.floor(score)), isNewBest: false };
   }
-  return { best, isNewBest: best > prev && score > 0 };
 }
 
 export function gradeFromRun(input: {
@@ -36,6 +33,8 @@ export function gradeFromRun(input: {
   phasesCompleted: number;
   phaseTotal: number;
   checkpointsUsed: number;
+  /** Optional extra points from local daily target (0–2). */
+  dailyPoints?: number;
 }): string {
   if (input.outcome !== 'won') {
     if (input.phasesCompleted >= input.phaseTotal - 1) return 'D';
@@ -44,7 +43,6 @@ export function gradeFromRun(input: {
   }
 
   let points = 0;
-  // Time vs par (faster is better, but not punishing early finishes too hard)
   const timeRatio = input.time / PHASE_PAR_SECONDS;
   if (timeRatio <= 0.85) points += 3;
   else if (timeRatio <= 1.0) points += 2;
@@ -61,6 +59,8 @@ export function gradeFromRun(input: {
 
   if (input.score >= 18000) points += 2;
   else if (input.score >= 12000) points += 1;
+
+  points += Math.max(0, Math.min(2, Math.floor(input.dailyPoints ?? 0)));
 
   if (points >= 10) return 'S';
   if (points >= 8) return 'A';
@@ -84,5 +84,11 @@ export function previewGrade(score: number, time: number, healthRatio: number): 
 
 export function formatEndSubtitle(summary: StrikeEndSummary): string {
   const best = summary.isNewBest ? ' · NEW BEST' : '';
-  return `Grade ${summary.grade}${best} · ${summary.phasesCompleted} phases · Fruzer strike`;
+  const daily = summary.dailyLabel ? ` · ${summary.dailyLabel}` : '';
+  return `Grade ${summary.grade}${best}${daily} · ${summary.phasesCompleted} phases · Fruzer strike`;
+}
+
+/** True only when the final (bonus-inclusive) score strictly beats the prior career best. */
+export function isStrictNewBest(previousBest: number, finalScore: number): boolean {
+  return finalScore > previousBest && finalScore > 0;
 }

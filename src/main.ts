@@ -7,14 +7,28 @@ import { HelicopterController } from './helicopter/controller';
 import { CheckpointSystem } from './rings/checkpoints';
 import { HUD } from './hud/hud';
 import { MobileControls } from './hud/mobileControls';
+import { MetaPanel } from './hud/metaPanel';
 import { VisualEffects } from './effects/visualEffects';
 import { getGameAudio } from './audio';
-import { StrikeMission, formatEndSubtitle, type StrikeEndSummary } from './mission';
+import { StrikeMission, formatEndSubtitle, isStrictNewBest, type StrikeEndSummary } from './mission';
 import { applyRendererDiagnostics } from './render';
 import { ensureSharedDebrisPhysics, getSharedDebrisPhysics, setSharedDebrisPhysics } from './physics';
 import { initPwa, type PwaController } from './pwa';
+import {
+  initProfileSession,
+  getProfile,
+  recordRun,
+  applyHeliCosmetics,
+  resolveReducedMotionActive,
+  readSystemPrefersReducedMotion,
+  qualityPreferenceToTier,
+  updateSettings,
+  type SettingsState,
+  type SkinId,
+  type LoadoutId,
+} from './profile';
 
-type GamePhase = 'loading' | 'start' | 'playing' | 'complete' | 'failed';
+type GamePhase = 'loading' | 'start' | 'playing' | 'paused' | 'complete' | 'failed';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const startOverlay = document.getElementById('start-overlay')!;
@@ -25,6 +39,9 @@ const loadingStatus = document.getElementById('loading-status');
 const appRoot = document.getElementById('app');
 
 const audio = getGameAudio();
+
+// Persistent profile + local daily identity (UTC) — before UI so hangar can read it.
+initProfileSession({ prefersReducedMotion: readSystemPrefersReducedMotion() });
 
 let sceneSetup: SceneSetup;
 let scene: THREE.Scene;
@@ -39,6 +56,7 @@ let mission: StrikeMission;
 let hud: HUD;
 let heli: THREE.Group;
 let mobileControls: MobileControls;
+let metaPanel: MetaPanel | null = null;
 let pwa: PwaController | null = null;
 
 let phase: GamePhase = 'loading';
@@ -52,6 +70,32 @@ const whooshBolts = new Set<string>();
 
 function setLoadingText(msg: string) {
   if (loadingStatus) loadingStatus.textContent = msg;
+}
+
+function applySettingsToRuntime(settings: SettingsState) {
+  const systemReduced = readSystemPrefersReducedMotion();
+  const reduced = resolveReducedMotionActive(settings.reducedMotion, systemReduced);
+
+  audio.setMuted(settings.muted);
+  audio.setMasterLevel(settings.masterVolume);
+  hud?.setMuted(settings.muted);
+  hud?.setCaptionsEnabled(settings.captions);
+
+  if (controller) {
+    controller.setSteeringSensitivity(settings.steeringSensitivity);
+    controller.setShakeScale(reduced ? 0 : 1);
+  }
+  if (fx) {
+    fx.setReducedMotion(reduced);
+    const pref = qualityPreferenceToTier(settings.quality);
+    fx.quality.setPreference(pref === 'auto' ? 'auto' : pref);
+  }
+}
+
+function applyEquippedCosmetics(skin?: SkinId, loadout?: LoadoutId) {
+  if (!heli) return;
+  const prog = getProfile().progression;
+  applyHeliCosmetics(heli, skin ?? prog.equippedSkin, loadout ?? prog.equippedLoadout);
 }
 
 function syncHud() {
@@ -80,10 +124,13 @@ function notifyPwaPhase() {
 
 function startGame() {
   if (!ready || phase === 'loading') return;
+  if (metaPanel?.isOpen) metaPanel.close();
   phase = 'playing';
   mission.reset();
   controller.reset(world.spawnPosition);
   controller.enabled = true;
+  applyEquippedCosmetics();
+  applySettingsToRuntime(getProfile().settings);
   fx.resetTrail();
   heardBolts.clear();
   whooshBolts.clear();
@@ -110,20 +157,77 @@ function finishMission(summary: StrikeEndSummary) {
   mobileControls.hide();
   audio.stopFlightAmbience();
   audio.handleEvent({ type: won ? 'mission-complete' : 'mission-failed' });
+
+  // Capture before recordRun so ties against the prior career best are not "NEW BEST".
+  const previousBest = getProfile().progression.bestScore;
+
+  const result = recordRun({
+    outcome: summary.outcome,
+    score: summary.score,
+    grade: summary.grade,
+    time: summary.time,
+    bestCombo: summary.bestCombo,
+    phasesCompleted: summary.phasesCompleted,
+    phaseTotal: 8,
+    checkpointsUsed: summary.checkpointsUsed,
+    completedPhaseIds: summary.completedPhaseIds ?? [],
+    phaseTimes: summary.phaseTimes,
+    rings: summary.rings,
+    ringsTotal: checkpoints.total,
+  });
+
+  const bonusScore = result.daily.bonus + result.loadoutBonus;
+  if (won && bonusScore > 0) {
+    summary.score = Math.floor(summary.score + bonusScore);
+    summary.dailyBonus = result.daily.bonus;
+    summary.loadoutBonus = result.loadoutBonus;
+    summary.dailyLabel = result.daily.label;
+  }
+
+  // Bonus-inclusive career best (recordRun already persisted + mirrored legacy key).
+  const finalScore = summary.score;
+  summary.isNewBest = won && isStrictNewBest(previousBest, finalScore);
+  summary.bestScore = Math.max(previousBest, getProfile().progression.bestScore, finalScore);
+
+  let subtitle = formatEndSubtitle(summary);
+  if (result.newlyUnlocked.length) {
+    const names = result.newlyUnlocked.map((u) => u.name).join(', ');
+    subtitle += ` · Unlocked ${names}`;
+  }
+
   hud.showComplete({
     title: won ? 'MISSION COMPLETE' : 'HULL DESTROYED',
-    subtitle: formatEndSubtitle(summary),
+    subtitle,
     score: summary.score,
     time: summary.time,
     kills: summary.kills,
     combo: summary.bestCombo,
   });
+  metaPanel?.refresh();
   notifyPwaPhase();
 }
 
 function restartGame() {
   completeOverlay.classList.add('hidden');
   startGame();
+}
+
+function setPaused(paused: boolean) {
+  if (paused) {
+    if (phase !== 'playing') return;
+    phase = 'paused';
+    controller.enabled = false;
+    mobileControls.hide();
+    void audio.suspend();
+  } else {
+    if (phase !== 'paused') return;
+    phase = 'playing';
+    controller.enabled = true;
+    mobileControls.show();
+    void audio.resume();
+    audio.startFlightAmbience();
+  }
+  notifyPwaPhase();
 }
 
 startBtn.disabled = true;
@@ -139,15 +243,39 @@ restartBtn.addEventListener('click', () => {
 });
 
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Enter' && phase === 'start') {
+  if (e.code === 'Enter' && phase === 'start' && !metaPanel?.isOpen) {
     audio.playUIConfirm();
     startGame();
   }
   if (
     e.code === 'KeyR'
     && (phase === 'playing' || phase === 'complete' || phase === 'failed')
+    && !metaPanel?.isOpen
   ) {
     restartGame();
+  }
+
+  // Escape / P — pause while flying; open settings on start; resume from pause.
+  if (e.code === 'Escape' || e.code === 'KeyP') {
+    if (e.repeat) return;
+    // Don't steal typing from form fields
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
+      if (e.code === 'Escape' && metaPanel?.isOpen) {
+        e.preventDefault();
+        metaPanel.close();
+      }
+      return;
+    }
+    e.preventDefault();
+    if (phase === 'playing') {
+      metaPanel?.togglePause();
+    } else if (phase === 'paused') {
+      metaPanel?.close();
+    } else if (phase === 'start') {
+      if (metaPanel?.currentMode === 'settings') metaPanel.close();
+      else metaPanel?.openSettings();
+    }
   }
 });
 
@@ -301,6 +429,9 @@ function animate() {
     if (outcome !== 'playing' && mission.summary) {
       finishMission(mission.summary);
     }
+  } else if (phase === 'paused') {
+    // Hold mission simulation; still render the frozen scene.
+    controller.enabled = false;
   } else if (phase === 'complete' || phase === 'failed') {
     // Drain residual combat FX / finale after mission ends
     mission.update(dt, time, heli, 0);
@@ -352,9 +483,11 @@ async function boot() {
     setLoadingText('Loading helicopter…');
     heli = await loadHelicopter();
     scene.add(heli);
+    applyEquippedCosmetics();
 
     controller = new HelicopterController(heli, camera, world.getGroundHeight);
     controller.setWorldBound(world.mapHalfExtent + 8);
+    applySettingsToRuntime(getProfile().settings);
     if (typeof controller.setMaxAltitude === 'function') {
       controller.setMaxAltitude(Math.max(200, world.bounds.max.y + 80));
     }
@@ -420,14 +553,18 @@ async function boot() {
     };
     hud = new HUD(checkpoints.total);
     hud.enableCombatHud(true);
-    hud.bindMuteHandler((muted) => audio.setMuted(muted));
+    hud.bindMuteHandler((muted) => {
+      updateSettings({ muted });
+      applySettingsToRuntime(getProfile().settings);
+    });
     hud.onWeaponReadyChange = (ready) =>
       audio.handleEvent({ type: 'weapon-ready', ready });
     let lastRadioToast = '';
     let lastRadioToastAt = 0;
     audio.onRadioCaption((caption) => {
-      // Text-radio hook — skip if HUD already showed the same line
+      // Text-radio hook — skip if captions off or HUD already showed the same line
       if (phase !== 'playing' || !caption.text) return;
+      if (!getProfile().settings.captions) return;
       const now = performance.now();
       if (caption.text === lastRadioToast && now - lastRadioToastAt < 1400) return;
       lastRadioToast = caption.text;
@@ -590,6 +727,10 @@ async function boot() {
       onUiTap: () => audio.playUISelect(),
     });
 
+    applySettingsToRuntime(getProfile().settings);
+    applyEquippedCosmetics();
+    metaPanel?.refresh();
+
     ready = true;
     phase = 'start';
     setLoadingText('');
@@ -608,10 +749,20 @@ async function main() {
   startBtn.disabled = true;
   startBtn.textContent = 'LOADING…';
 
+  // Hangar / settings available during load (profile already initialized).
+  metaPanel = new MetaPanel({
+    onSettingsChanged: (settings) => applySettingsToRuntime(settings),
+    onCosmeticsChanged: (skin, loadout) => applyEquippedCosmetics(skin, loadout),
+    onPauseChange: (paused) => setPaused(paused),
+    playSelect: () => audio.playUISelect(),
+  });
+  metaPanel.refresh();
+
   if (appRoot) {
     pwa = await initPwa({
       root: appRoot,
-      getMissionSafety: () => (phase === 'playing' ? 'active' : 'safe'),
+      getMissionSafety: () =>
+        phase === 'playing' || phase === 'paused' ? 'active' : 'safe',
     });
   }
 
@@ -622,6 +773,7 @@ async function main() {
     camera = sceneSetup.camera;
     sunLight = sceneSetup.sunLight;
     fx = new VisualEffects(sceneSetup);
+    applySettingsToRuntime(getProfile().settings);
 
     sunLight.target.position.set(0, 0, 0);
     scene.add(sunLight.target);
