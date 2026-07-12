@@ -123,6 +123,7 @@ export function queryProximity(
   for (let i = 0; i < count; i++) {
     const box = hash.getCollider(_queryIds[i]);
     if (!box) continue;
+    if (box.tag === 'camera-perimeter') continue;
 
     // Cheap Y reject against look-ahead capsule
     if (_center.y + pad < box.minY || _center.y - pad > box.maxY) continue;

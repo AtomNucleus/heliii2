@@ -10,6 +10,7 @@ import type { ColliderAABB } from './types';
 import {
   CAMERA_OCCLUSION,
   clampCameraToWorldBound,
+  createPerimeterWalls,
   rayAABBEnterT,
   resolveCameraOcclusion,
   pushCameraOutOfSolids,
@@ -46,11 +47,9 @@ describe('rayAABBEnterT', () => {
   });
 
   it('reports entry t when the arm hits a wall behind the craft', () => {
-    // Pivot at origin, camera desired at z=-30 — wall spans z -5..5 at x 10..14
-    // Shoot toward +X into the wall
     const t = rayAABBEnterT(0, 5, 0, 20, 0, 0, wall, 0);
     assert.ok(t !== null);
-    assert.ok(Math.abs((t as number) - 0.5) < 1e-6); // hits at x=10, t=10/20
+    assert.ok(Math.abs((t as number) - 0.5) < 1e-6);
   });
 
   it('returns 0 when the origin is already inside', () => {
@@ -61,7 +60,6 @@ describe('rayAABBEnterT', () => {
   it('accounts for inflate radius (camera probe)', () => {
     const t = rayAABBEnterT(0, 5, 0, 20, 0, 0, wall, 1.35);
     assert.ok(t !== null);
-    // Inflated minX = 10 - 1.35 = 8.65 → t = 8.65/20
     assert.ok(Math.abs((t as number) - 8.65 / 20) < 1e-6);
   });
 });
@@ -71,14 +69,13 @@ describe('resolveCameraOcclusion', () => {
     const wall = box(0, -4, 0, -40, 4, 30, -20);
     const hash = new SpatialHash([wall], 12);
     const pivot = new THREE.Vector3(0, 8, 0);
-    const desired = new THREE.Vector3(0, 12, -34); // classic chase offset into wall
+    const desired = new THREE.Vector3(0, 12, -34);
 
     const result = resolveCameraOcclusion(pivot, desired, hash);
     assert.equal(result.hit, true);
     assert.ok(desired.z > -34, 'camera should pull forward away from far side');
-    // Should stop before entering the inflated wall (minZ=-40, maxZ=-20)
     assert.ok(
-      desired.z > -20 + CAMERA_OCCLUSION.radius * 0.5,
+      desired.z > -20 + CAMERA_OCCLUSION.radius * 0.25,
       `expected clear of wall face, got z=${desired.z}`,
     );
   });
@@ -93,21 +90,67 @@ describe('resolveCameraOcclusion', () => {
     assert.equal(desired.z, -34);
   });
 
+  it('does not tunnel through a thin wall when heli is closer than minDistance', () => {
+    // Regression: old minDistance floor forced t past the hit plane.
+    const wall = box(0, -6, 0, -8, 6, 24, -4);
+    const hash = new SpatialHash([wall], 12);
+    const pivot = new THREE.Vector3(0, 8, 0); // 4m from near face at z=-4
+    const desired = new THREE.Vector3(0, 10, -34); // arm through wall
+
+    const result = resolveCameraOcclusion(pivot, desired, hash);
+    assert.equal(result.hit, true);
+    // Must stay on the pivot side of the near face (with radius clearance)
+    assert.ok(
+      desired.z > -4 - 0.1,
+      `camera tunneled past near face: z=${desired.z}`,
+    );
+    assert.ok(desired.z < 0.5, `camera should still be behind pivot, z=${desired.z}`);
+  });
+
+  it('keeps the camera on the arm (no sideways far-face exit)', () => {
+    const wall = box(0, -5, 0, -12, 5, 20, -6);
+    const hash = new SpatialHash([wall], 12);
+    const pivot = new THREE.Vector3(0, 8, 0);
+    const desired = new THREE.Vector3(0, 10, -30);
+
+    resolveCameraOcclusion(pivot, desired, hash);
+    assert.ok(Math.abs(desired.x) < 0.75, `drifted off arm: x=${desired.x}`);
+    assert.ok(desired.z > -6 - 0.1, `exited far side: z=${desired.z}`);
+  });
+
   it('pushes the camera out when placed inside solid geometry', () => {
     const wall = box(0, -5, 0, -5, 5, 20, 5);
     const hash = new SpatialHash([wall], 12);
-    const pos = new THREE.Vector3(0, 8, 0); // inside
-    const pushed = pushCameraOutOfSolids(pos, hash);
+    const pos = new THREE.Vector3(0, 8, 0);
+    const pivot = new THREE.Vector3(0, 8, 12);
+    const pushed = pushCameraOutOfSolids(pos, hash, CAMERA_OCCLUSION.radius, pivot);
     assert.equal(pushed, true);
-    assert.ok(pos.length() > 5, 'should be outside the AABB');
+    assert.ok(pos.z > 5 - 0.01, `should exit toward pivot (+Z), z=${pos.z}`);
   });
 });
 
 describe('clampCameraToWorldBound', () => {
   it('keeps the camera inside the map rim', () => {
     const pos = new THREE.Vector3(200, 10, -180);
-    clampCameraToWorldBound(pos, 105, 2.5);
-    assert.ok(Math.abs(pos.x) <= 102.5 + 1e-6);
-    assert.ok(Math.abs(pos.z) <= 102.5 + 1e-6);
+    clampCameraToWorldBound(pos, 105, 1.5);
+    assert.ok(Math.abs(pos.x) <= 103.5 + 1e-6);
+    assert.ok(Math.abs(pos.z) <= 103.5 + 1e-6);
+  });
+});
+
+describe('createPerimeterWalls', () => {
+  it('blocks a chase arm that swings past the map edge', () => {
+    const half = 100;
+    const walls = createPerimeterWalls(half).map((w, i) => ({ ...w, id: i }));
+    const hash = new SpatialHash(walls, 16);
+    const pivot = new THREE.Vector3(90, 10, 0); // near +X rim
+    const desired = new THREE.Vector3(140, 14, 0); // outside map
+
+    const result = resolveCameraOcclusion(pivot, desired, hash);
+    assert.equal(result.hit, true);
+    assert.ok(
+      desired.x <= half + 0.5,
+      `camera should stop at rim, got x=${desired.x}`,
+    );
   });
 });

@@ -30,6 +30,7 @@ import type {
 } from './types';
 import {
   clampCameraToWorldBound,
+  createPerimeterWalls,
   resolveCameraOcclusion,
   type CameraOcclusionResult,
 } from './cameraOcclusion';
@@ -357,27 +358,25 @@ export class WorldCollision {
 
   /**
    * Spring-arm style chase-camera clamp: pull `desired` toward `pivot`
-   * when buildings/props block the arm, and optionally soft-clamp to the
-   * playable world bound (map edges).
+   * when buildings/props (including perimeter rim slabs) block the arm.
+   * `cameraBound` should be the visual map half-extent (not heli soft bound).
    */
   resolveCameraPosition(
     pivot: THREE.Vector3,
     desired: THREE.Vector3,
-    worldBound?: number,
+    cameraBound?: number,
   ): CameraOcclusionResult {
     const result = resolveCameraOcclusion(pivot, desired, this.hash);
     let hit = result.hit;
     let t = result.t;
 
-    if (worldBound !== undefined && worldBound > 0) {
+    if (cameraBound !== undefined && cameraBound > 0) {
       const beforeX = desired.x;
       const beforeZ = desired.z;
-      clampCameraToWorldBound(desired, worldBound);
+      clampCameraToWorldBound(desired, cameraBound);
       const rimHit = desired.x !== beforeX || desired.z !== beforeZ;
       if (rimHit) {
         hit = true;
-        // Bound clamp can slide the lens sideways into perimeter walls —
-        // re-run the arm resolve on the clamped point.
         const again = resolveCameraOcclusion(pivot, desired, this.hash);
         if (again.hit) {
           t = Math.min(t, again.t);
@@ -386,6 +385,23 @@ export class WorldCollision {
     }
 
     return { hit, t };
+  }
+
+  /**
+   * Register four rim slabs at ±halfExtent so edge turns always occlude
+   * the chase arm (fence/glass meshes are often skipped during bake).
+   */
+  ensurePerimeterWalls(halfExtent: number, height?: number): number {
+    const existing = this.hash.all();
+    for (let i = 0; i < existing.length; i++) {
+      if (existing[i].tag === 'camera-perimeter') return 0;
+    }
+    const walls = createPerimeterWalls(halfExtent, height);
+    for (const w of walls) {
+      this.hash.addCollider(w);
+    }
+    this.debug.setHash(this.hash);
+    return walls.length;
   }
 
   getLastResult(): WorldImpactResult | null {

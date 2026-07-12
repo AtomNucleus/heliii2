@@ -200,15 +200,23 @@ export function updateChaseCamera(
   const shakeAmp = updateShake(state.shake, dt);
   const shakeOffset = state._shakeOffset.set(0, 0, 0);
   if (shakeAmp > 0.001) {
+    // Scale shake down when pressed against geometry so trauma can't shove
+    // the lens back into a wall after occlusion resolve.
+    const shakeScale = 1 - state.occlusion * 0.85;
     const t = performance.now() * 0.001;
+    const amp = shakeAmp * shakeScale;
     shakeOffset.set(
-      Math.sin(t * 37.1) * shakeAmp,
-      Math.cos(t * 29.7) * shakeAmp * 0.72,
-      Math.sin(t * 41.3) * shakeAmp * 0.5,
+      Math.sin(t * 37.1) * amp,
+      Math.cos(t * 29.7) * amp * 0.72,
+      Math.sin(t * 41.3) * amp * 0.5,
     );
   }
 
   camera.position.copy(state.camSmooth).add(shakeOffset);
+  // Re-clamp after shake so the final lens pose never rests inside solids
+  if (occlusion && shakeOffset.lengthSq() > 1e-6) {
+    occlusion.resolve(pivot, camera.position);
+  }
   camera.lookAt(state.lookSmooth);
 
   // Subtle bank lean after lookAt (does not fight look direction much)

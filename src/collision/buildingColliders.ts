@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import type { ColliderAABB } from './types';
 import { SpatialHash } from './spatialHash';
 
-/** Skip decorative / non-solid materials by name. */
-const SKIP_MAT = /water|fence|glass|decal|leaf|foliage|particle/i;
+/** Skip decorative / non-solid materials by name. Keep fences — they are rim walls. */
+const SKIP_MAT = /water|glass|decal|leaf|foliage|particle/i;
 /** Prefer solid structure names when present. */
 const BUILDING_HINT = /build|hangar|wall|tower|depot|container|crate|house|roof|bunker|wall/i;
 
@@ -57,7 +57,10 @@ export function extractBuildingColliders(
     const sx = box.max.x - box.min.x;
     const sy = box.max.y - box.min.y;
     const sz = box.max.z - box.min.z;
-    if (sx < 0.35 || sz < 0.35 || sy < 0.25) continue;
+    // Keep long thin wall slabs (typical map-edge / hangar walls)
+    const longWall =
+      Math.max(sx, sz) >= 6 && sy >= 1.2 && Math.min(sx, sz) >= 0.12;
+    if (!longWall && (sx < 0.35 || sz < 0.35 || sy < 0.25)) continue;
 
     const footprint = sx * sz;
     if (footprint < opt.minFootprint && sy < opt.minBuildingHeight) continue;
@@ -83,6 +86,7 @@ export function extractBuildingColliders(
       height >= opt.minBuildingHeight ||
       BUILDING_HINT.test(matName) ||
       BUILDING_HINT.test(mesh.name) ||
+      longWall ||
       (height > 1.6 && footprint > 8)
     ) {
       kind = 'building';

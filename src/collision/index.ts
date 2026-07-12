@@ -44,5 +44,6 @@ export {
   pushCameraOutOfSolids,
   clampCameraToWorldBound,
   setCameraPivot,
+  createPerimeterWalls,
 } from './cameraOcclusion';
 export type { CameraOcclusionResult } from './cameraOcclusion';

@@ -6,18 +6,25 @@ import { sphereVsAABB } from './resolve';
 /** Chase-camera probe against building/prop AABBs (spring-arm style). */
 export const CAMERA_OCCLUSION = {
   /** Sphere radius around the camera for wall clearance. */
-  radius: 1.35,
+  radius: 1.5,
   /** Extra pull-back from the hit surface along the arm. */
-  skin: 0.45,
-  /** Never pull closer than this to the pivot (m). */
-  minDistance: 5.5,
+  skin: 0.55,
+  /**
+   * Preferred minimum arm length when the path is clear.
+   * NEVER used to push the camera past a hit — that caused tunneling.
+   */
+  minDistance: 3.5,
   /** Inflate query AABB along the arm segment. */
-  queryPad: 1.6,
+  queryPad: 2,
+  /** Steps when walking the arm back out of solids. */
+  clearSteps: 24,
 } as const;
 
 const _queryIds: number[] = [];
 const _normal = new THREE.Vector3();
 const _dir = new THREE.Vector3();
+const _unit = new THREE.Vector3();
+const _probe = new THREE.Vector3();
 
 /**
  * Slab-method ray vs AABB. Returns entry t along the ray, or null on miss.
@@ -105,9 +112,57 @@ export interface CameraOcclusionResult {
   t: number;
 }
 
+function sphereOverlapsAny(
+  x: number,
+  y: number,
+  z: number,
+  radius: number,
+  hash: SpatialHash,
+): boolean {
+  const pad = radius + 0.35;
+  const count = hash.queryIds(x - pad, x + pad, z - pad, z + pad, _queryIds);
+  for (let i = 0; i < count; i++) {
+    const box = hash.getCollider(_queryIds[i]);
+    if (!box) continue;
+    if (y + radius < box.minY || y - radius > box.maxY) continue;
+    const hit = sphereVsAABB(x, y, z, radius, box, _normal);
+    if (hit.hit && hit.penetration > 0.001) return true;
+  }
+  return false;
+}
+
+/**
+ * Walk `t` toward the pivot until the camera sphere is clear of solids.
+ * Stays strictly on the chase arm (no sideways tunnel-through).
+ */
+function walkArmClear(
+  pivot: THREE.Vector3,
+  dir: THREE.Vector3,
+  startT: number,
+  radius: number,
+  hash: SpatialHash,
+): number {
+  let t = THREE.MathUtils.clamp(startT, 0, 1);
+  _probe.copy(pivot).addScaledVector(dir, t);
+  if (!sphereOverlapsAny(_probe.x, _probe.y, _probe.z, radius, hash)) {
+    return t;
+  }
+
+  const steps = CAMERA_OCCLUSION.clearSteps;
+  for (let i = 1; i <= steps; i++) {
+    t = startT * (1 - i / steps);
+    if (t < 0) t = 0;
+    _probe.copy(pivot).addScaledVector(dir, t);
+    if (!sphereOverlapsAny(_probe.x, _probe.y, _probe.z, radius, hash)) {
+      return t;
+    }
+  }
+  return 0;
+}
+
 /**
  * Pull `desired` along pivot→desired so the camera sphere stays clear of AABBs.
- * Also pushes out if the final point still overlaps (corner cases / lag).
+ * Always remains on the spring arm — never uses minDistance to jump past a hit.
  */
 export function resolveCameraOcclusion(
   pivot: THREE.Vector3,
@@ -115,7 +170,7 @@ export function resolveCameraOcclusion(
   hash: SpatialHash,
   radius: number = CAMERA_OCCLUSION.radius,
   skin: number = CAMERA_OCCLUSION.skin,
-  minDistance: number = CAMERA_OCCLUSION.minDistance,
+  _minDistance: number = CAMERA_OCCLUSION.minDistance,
 ): CameraOcclusionResult {
   _dir.copy(desired).sub(pivot);
   const armLen = _dir.length();
@@ -159,32 +214,46 @@ export function resolveCameraOcclusion(
     }
   }
 
+  let t = 1;
   if (hit) {
+    // Pull back along the arm only — never raise t past the hit plane
     const skinT = skin / armLen;
-    const minT = Math.min(1, minDistance / armLen);
-    let t = bestT - skinT;
-    if (t < minT) t = minT;
-    if (t > 1) t = 1;
-    // If the first hit is extremely close to the pivot, stay at minDistance
-    // along the arm rather than diving into the wall at t=0.
-    if (bestT <= skinT && armLen > minDistance) {
-      t = minT;
-    }
-    desired.copy(pivot).addScaledVector(_dir, t);
-    bestT = t;
+    t = Math.max(0, bestT - skinT);
   }
 
-  // Safety: push out if still overlapping (e.g. pivot itself near a wall)
-  pushCameraOutOfSolids(desired, hash, radius);
+  // Ensure the sphere at `t` is clear (handles corners / partial overlaps)
+  t = walkArmClear(pivot, _dir, t, radius, hash);
+  if (t < 1 - 1e-4) hit = true;
 
-  return { hit, t: hit ? bestT : 1 };
+  desired.copy(pivot).addScaledVector(_dir, t);
+
+  // Last resort: if still overlapping (pivot inside solid), nudge toward free
+  // space preferring the side facing the pivot (anti-tunnel).
+  if (sphereOverlapsAny(desired.x, desired.y, desired.z, radius, hash)) {
+    pushCameraOutOfSolids(desired, hash, radius, pivot);
+    // Re-project onto the arm so we don't slide around the far side of a wall
+    _unit.copy(desired).sub(pivot);
+    const projLen = _unit.dot(_dir) / (armLen * armLen);
+    const clamped = THREE.MathUtils.clamp(projLen, 0, t);
+    desired.copy(pivot).addScaledVector(_dir, clamped);
+    t = walkArmClear(pivot, _dir, clamped, radius, hash);
+    desired.copy(pivot).addScaledVector(_dir, t);
+    hit = true;
+  }
+
+  return { hit, t: hit ? t : 1 };
 }
 
-/** Sphere push-out against nearby AABBs so the camera never rests inside geometry. */
+/**
+ * Sphere push-out against nearby AABBs.
+ * When `preferPivot` is set, bias the push so we exit toward the pivot
+ * instead of tunneling through to the far face of thin walls.
+ */
 export function pushCameraOutOfSolids(
   position: THREE.Vector3,
   hash: SpatialHash,
   radius: number = CAMERA_OCCLUSION.radius,
+  preferPivot?: THREE.Vector3,
 ): boolean {
   const pad = radius + 0.5;
   const count = hash.queryIds(
@@ -210,6 +279,19 @@ export function pushCameraOutOfSolids(
       _normal,
     );
     if (!hit.hit || hit.penetration <= 0.001) continue;
+
+    // Prefer exiting toward the pivot when the nearest-face normal fights it
+    // (or is orthogonal — common when the probe is dead-center in a box).
+    if (preferPivot) {
+      _unit.copy(preferPivot).sub(position);
+      if (_unit.lengthSq() > 1e-6) {
+        _unit.normalize();
+        if (_normal.dot(_unit) < 0.2) {
+          _normal.copy(_unit);
+        }
+      }
+    }
+
     position.addScaledVector(_normal, hit.penetration + CAMERA_OCCLUSION.skin * 0.35);
     pushed = true;
   }
@@ -217,13 +299,13 @@ export function pushCameraOutOfSolids(
 }
 
 /**
- * Soft-clamp camera XZ inside the playable world bound so edge turns
- * don't park the lens past the map rim into perimeter geometry.
+ * Soft-clamp camera XZ inside the playable map half-extent so edge turns
+ * don't park the lens past the visual rim.
  */
 export function clampCameraToWorldBound(
   position: THREE.Vector3,
   worldBound: number,
-  margin = 2.5,
+  margin = 1.5,
 ): void {
   const limit = Math.max(8, worldBound - margin);
   position.x = THREE.MathUtils.clamp(position.x, -limit, limit);
@@ -239,4 +321,66 @@ export function setCameraPivot(
   out.copy(heliPos);
   out.y += lookHeight;
   return out;
+}
+
+/**
+ * Four solid rim slabs at ±halfExtent so the chase arm always has something
+ * to hit at the map edge — even when fence/glass meshes were skipped in bake.
+ */
+export function createPerimeterWalls(
+  halfExtent: number,
+  height = 90,
+  thickness = 6,
+): Array<Omit<ColliderAABB, 'id'> & { tag: string }> {
+  const h = Math.max(20, halfExtent);
+  const t = Math.max(2, thickness);
+  const y0 = -4;
+  const y1 = height;
+  const pad = h + t;
+  return [
+    {
+      minX: h,
+      minY: y0,
+      minZ: -pad,
+      maxX: h + t,
+      maxY: y1,
+      maxZ: pad,
+      kind: 'building',
+      active: true,
+      tag: 'camera-perimeter',
+    },
+    {
+      minX: -h - t,
+      minY: y0,
+      minZ: -pad,
+      maxX: -h,
+      maxY: y1,
+      maxZ: pad,
+      kind: 'building',
+      active: true,
+      tag: 'camera-perimeter',
+    },
+    {
+      minX: -pad,
+      minY: y0,
+      minZ: h,
+      maxX: pad,
+      maxY: y1,
+      maxZ: h + t,
+      kind: 'building',
+      active: true,
+      tag: 'camera-perimeter',
+    },
+    {
+      minX: -pad,
+      minY: y0,
+      minZ: -h - t,
+      maxX: pad,
+      maxY: y1,
+      maxZ: -h,
+      kind: 'building',
+      active: true,
+      tag: 'camera-perimeter',
+    },
+  ];
 }
