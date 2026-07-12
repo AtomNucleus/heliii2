@@ -98,10 +98,35 @@ test.describe('HELI SUNSET smoke', () => {
 
     const { pageErrors, consoleErrors } = attachErrorCollectors(page);
 
+    // Regression guard: Fruzer bake must decode atlases once, not one canvas per texel.
+    await page.addInitScript(() => {
+      let canvasCreates = 0;
+      const orig = document.createElement.bind(document);
+      document.createElement = ((tagName: string, options?: ElementCreationOptions) => {
+        if (String(tagName).toLowerCase() === 'canvas') canvasCreates += 1;
+        return orig(tagName, options);
+      }) as typeof document.createElement;
+      Object.defineProperty(window, '__heliCanvasCreates', {
+        configurable: true,
+        get: () => canvasCreates,
+      });
+    });
+
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expectShellVisible(page);
 
     const settled = await expectBootSettledWithoutBareLoadFailed(page);
+
+    // After map materials, canvas thrash from per-sample readback would be thousands.
+    // Allow headroom for legitimate renderer/effect canvases.
+    const canvasCreates = await page.evaluate(() =>
+      Number((window as unknown as { __heliCanvasCreates?: number }).__heliCanvasCreates ?? 0),
+    );
+    expect(
+      canvasCreates,
+      `startup created ${canvasCreates} canvases — Fruzer atlas bake likely regressing to per-texel readback`,
+    ).toBeLessThan(80);
+
     const startBtn = page.locator('#start-btn');
 
     if (settled === 'ready-or-partial') {
@@ -125,6 +150,19 @@ test.describe('HELI SUNSET smoke', () => {
 
     const { pageErrors, consoleErrors } = attachErrorCollectors(page);
 
+    await page.addInitScript(() => {
+      let canvasCreates = 0;
+      const orig = document.createElement.bind(document);
+      document.createElement = ((tagName: string, options?: ElementCreationOptions) => {
+        if (String(tagName).toLowerCase() === 'canvas') canvasCreates += 1;
+        return orig(tagName, options);
+      }) as typeof document.createElement;
+      Object.defineProperty(window, '__heliCanvasCreates', {
+        configurable: true,
+        get: () => canvasCreates,
+      });
+    });
+
     await page.goto('/?renderer=webgl', { waitUntil: 'domcontentloaded' });
     await expectShellVisible(page);
 
@@ -138,6 +176,14 @@ test.describe('HELI SUNSET smoke', () => {
 
     const settled = await expectBootSettledWithoutBareLoadFailed(page);
     const startBtn = page.locator('#start-btn');
+
+    const canvasCreates = await page.evaluate(() =>
+      Number((window as unknown as { __heliCanvasCreates?: number }).__heliCanvasCreates ?? 0),
+    );
+    expect(
+      canvasCreates,
+      `WebGL boot created ${canvasCreates} canvases — Fruzer atlas bake thrash regression`,
+    ).toBeLessThan(80);
 
     if (settled === 'ready-or-partial') {
       try {

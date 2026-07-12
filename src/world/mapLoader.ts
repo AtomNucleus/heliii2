@@ -5,6 +5,7 @@ import { COLORS, createSunsetSkyDome, createSunDisc } from '../scene/setup';
 import { createEnvironmentLayer, type EnvironmentLayer } from './environmentLayer';
 import { WorldCollision } from '../collision';
 import { withTimeout } from '../utils/withTimeout';
+import { applyFruzerMaterials } from './fruzerMaterials';
 
 /** Target play-area width (largest XZ extent after scale), in world units */
 export const MAP_TARGET_SIZE = 260;
@@ -612,50 +613,28 @@ export async function loadMapWorld(
 
   await beginStage('Preparing map surfaces…', 'map-materials', 0.68);
 
+  // Collapse scrambled atlas stretches into flat Chicken Gun swatches while
+  // keeping legitimate tiny-swatch UVs on nearest-filtered textures.
+  // Async + atlas CPU cache: avoids thousands of sync canvas readbacks that
+  // freeze / OOM mobile browsers during startup.
+  const matStats = await applyFruzerMaterials(mapScaled, {
+    yieldToMain: yieldToMainThread,
+    onChunk: (done, total) => {
+      if (total < 1) return;
+      const ratio = 0.68 + (done / total) * 0.06;
+      onProgress?.(ratio);
+      options.onStage?.(
+        `Preparing map surfaces… ${Math.round((done / total) * 100)}%`,
+        'map-materials',
+      );
+    },
+  });
+  console.info('[map] materials', matStats);
+
   const colliders: THREE.Mesh[] = [];
   mapScaled.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
-    // Flat unlit look matches Sketchfab / Chicken Gun; avoid PBR muddying
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    if (mesh.material) {
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      const next: THREE.Material[] = [];
-      for (const m of mats) {
-        const src = m as THREE.MeshStandardMaterial;
-        const map = src.map;
-        if (map) {
-          map.colorSpace = THREE.SRGBColorSpace;
-          map.channel = 0;
-          // Palette atlases sample tiny color swatches — bilinear blur
-          // turns them into muddy brown. Keep crisp nearest filtering.
-          map.magFilter = THREE.NearestFilter;
-          map.minFilter = THREE.NearestFilter;
-          map.generateMipmaps = false;
-          map.needsUpdate = true;
-        }
-        const name = src.name || '';
-        const isFence = /fence/i.test(name);
-        const isWater = /water/i.test(name);
-        const basic = new THREE.MeshBasicMaterial({
-          map: map ?? null,
-          color: src.color?.clone?.() ?? new THREE.Color(0xffffff),
-          transparent: src.transparent || isWater,
-          opacity: src.opacity ?? 1,
-          alphaTest: src.alphaTest > 0 ? src.alphaTest : isFence ? 0.5 : 0,
-          side: isFence || isWater ? THREE.DoubleSide : (src.side ?? THREE.FrontSide),
-          depthWrite: isWater ? false : src.depthWrite !== false,
-        });
-        basic.name = name;
-        if (isWater) {
-          basic.opacity = Math.min(basic.opacity, 0.85);
-        }
-        src.dispose?.();
-        next.push(basic);
-      }
-      mesh.material = next.length === 1 ? next[0] : next;
-    }
     colliders.push(mesh);
   });
 

@@ -463,45 +463,53 @@
           RST
         </button>
 
-        <button id="mobile-fire" class="mobile-fire" type="button" aria-label="Fire rockets">
-          FIRE
-        </button>
-
-        <div class="mobile-steer-zone" aria-label="Steer and move">
-          <div id="mobile-stick" class="mobile-stick" role="application" aria-label="Move joystick">
-            <span class="mobile-stick-label mobile-stick-label-top">FWD</span>
-            <span class="mobile-stick-label mobile-stick-label-bottom">BACK</span>
-            <span class="mobile-stick-label mobile-stick-label-left">LEFT</span>
-            <span class="mobile-stick-label mobile-stick-label-right">RIGHT</span>
-            <div id="mobile-stick-knob" class="mobile-stick-knob"></div>
+        <div class="mobile-dock">
+          <div class="mobile-steer-zone" aria-label="Steer and move">
+            <div
+              id="mobile-stick"
+              class="mobile-stick"
+              role="application"
+              aria-label="Move joystick"
+            >
+              <span class="mobile-stick-label mobile-stick-label-top">FWD</span>
+              <span class="mobile-stick-label mobile-stick-label-bottom">BACK</span>
+              <span class="mobile-stick-label mobile-stick-label-left">LEFT</span>
+              <span class="mobile-stick-label mobile-stick-label-right">RIGHT</span>
+              <div id="mobile-stick-knob" class="mobile-stick-knob"></div>
+            </div>
           </div>
-        </div>
 
-        <div class="mobile-altitude-zone" aria-label="Altitude and boost">
-          <button
-            class="mobile-altitude-button"
-            type="button"
-            data-mobile-input="up"
-            aria-label="Ascend"
-          >
-            ASC
-          </button>
-          <button
-            class="mobile-altitude-button mobile-altitude-button-boost"
-            type="button"
-            data-mobile-input="boost"
-            aria-label="Boost"
-          >
-            BST
-          </button>
-          <button
-            class="mobile-altitude-button mobile-altitude-button-descend"
-            type="button"
-            data-mobile-input="down"
-            aria-label="Descend"
-          >
-            DESC
-          </button>
+          <div class="mobile-action-stack" aria-label="Fire, altitude, and boost">
+            <button id="mobile-fire" class="mobile-fire" type="button" aria-label="Fire rockets">
+              FIRE
+            </button>
+            <div class="mobile-altitude-zone" aria-label="Altitude and boost">
+              <button
+                class="mobile-altitude-button"
+                type="button"
+                data-mobile-input="up"
+                aria-label="Ascend"
+              >
+                ASC
+              </button>
+              <button
+                class="mobile-altitude-button mobile-altitude-button-boost"
+                type="button"
+                data-mobile-input="boost"
+                aria-label="Boost"
+              >
+                BST
+              </button>
+              <button
+                class="mobile-altitude-button mobile-altitude-button-descend"
+                type="button"
+                data-mobile-input="down"
+                aria-label="Descend"
+              >
+                DESC
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

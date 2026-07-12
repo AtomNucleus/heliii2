@@ -122,6 +122,9 @@ export class MobileControls {
     const shouldShow = this.playing && this.supportsTouchControls();
     this.root.classList.toggle('hidden', !shouldShow);
     this.root.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+    // Drive HUD safe-zone CSS from an explicit root class (not :has), so
+    // mission/toast/score never sit under the dock on any WebView.
+    document.documentElement.classList.toggle('touch-ui', shouldShow);
     if (!shouldShow) this.releaseAllInputs();
   }
 
