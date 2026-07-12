@@ -28,6 +28,11 @@ import type {
   ProximityWarning,
   WorldImpactResult,
 } from './types';
+import {
+  clampCameraToWorldBound,
+  resolveCameraOcclusion,
+  type CameraOcclusionResult,
+} from './cameraOcclusion';
 
 export interface WorldCollisionOptions extends ExtractOptions {
   cellSize?: number;
@@ -348,6 +353,39 @@ export class WorldCollision {
     );
 
     return result;
+  }
+
+  /**
+   * Spring-arm style chase-camera clamp: pull `desired` toward `pivot`
+   * when buildings/props block the arm, and optionally soft-clamp to the
+   * playable world bound (map edges).
+   */
+  resolveCameraPosition(
+    pivot: THREE.Vector3,
+    desired: THREE.Vector3,
+    worldBound?: number,
+  ): CameraOcclusionResult {
+    const result = resolveCameraOcclusion(pivot, desired, this.hash);
+    let hit = result.hit;
+    let t = result.t;
+
+    if (worldBound !== undefined && worldBound > 0) {
+      const beforeX = desired.x;
+      const beforeZ = desired.z;
+      clampCameraToWorldBound(desired, worldBound);
+      const rimHit = desired.x !== beforeX || desired.z !== beforeZ;
+      if (rimHit) {
+        hit = true;
+        // Bound clamp can slide the lens sideways into perimeter walls —
+        // re-run the arm resolve on the clamped point.
+        const again = resolveCameraOcclusion(pivot, desired, this.hash);
+        if (again.hit) {
+          t = Math.min(t, again.t);
+        }
+      }
+    }
+
+    return { hit, t };
   }
 
   getLastResult(): WorldImpactResult | null {

@@ -137,6 +137,21 @@ export class HelicopterController {
   private steeringSensitivity = 1;
   /** Camera shake scale (0 when reduced motion). */
   private shakeScale = 1;
+  /** Stable chase-camera occlusion hook (avoids per-frame alloc). */
+  private readonly cameraOcclusion = {
+    resolve: (pivot: THREE.Vector3, desired: THREE.Vector3): boolean => {
+      const collision = this.worldCollision;
+      if (collision) {
+        return collision.resolveCameraPosition(pivot, desired, this.worldBound).hit;
+      }
+      const beforeX = desired.x;
+      const beforeZ = desired.z;
+      const limit = Math.max(8, this.worldBound - 2.5);
+      desired.x = THREE.MathUtils.clamp(desired.x, -limit, limit);
+      desired.z = THREE.MathUtils.clamp(desired.z, -limit, limit);
+      return desired.x !== beforeX || desired.z !== beforeZ;
+    },
+  };
 
   private mainRotor: THREE.Object3D | null = null;
   private tailRotor: THREE.Object3D | null = null;
@@ -599,6 +614,7 @@ export class HelicopterController {
       this.boost.active,
       FLIGHT.maxSpeed,
       dt,
+      this.cameraOcclusion,
     );
   }
 }
