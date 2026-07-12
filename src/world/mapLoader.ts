@@ -615,7 +615,20 @@ export async function loadMapWorld(
 
   // Collapse scrambled atlas stretches into flat Chicken Gun swatches while
   // keeping legitimate tiny-swatch UVs on nearest-filtered textures.
-  const matStats = applyFruzerMaterials(mapScaled);
+  // Async + atlas CPU cache: avoids thousands of sync canvas readbacks that
+  // freeze / OOM mobile browsers during startup.
+  const matStats = await applyFruzerMaterials(mapScaled, {
+    yieldToMain: yieldToMainThread,
+    onChunk: (done, total) => {
+      if (total < 1) return;
+      const ratio = 0.68 + (done / total) * 0.06;
+      onProgress?.(ratio);
+      options.onStage?.(
+        `Preparing map surfaces… ${Math.round((done / total) * 100)}%`,
+        'map-materials',
+      );
+    },
+  });
   console.info('[map] materials', matStats);
 
   const colliders: THREE.Mesh[] = [];
