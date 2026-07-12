@@ -91,7 +91,10 @@ export function sampleGroundPoints(
   const spawn = opts.spawn;
   const maxSlope = opts.maxSlope ?? 3.5;
   const out: PlacementSample[] = [];
-  const maxTries = count * 8;
+  // Four candidates per requested point is enough for sparse dressing. The old
+  // 8× budget could trigger thousands of terrain samples during synchronous
+  // startup when a region had few valid placements.
+  const maxTries = count * 4;
 
   for (let i = 0; i < maxTries && out.length < count; i++) {
     const x = (rng() * 2 - 1) * half;

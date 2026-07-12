@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import {
+  DRACOLoader,
+  DRACO_GLTF_CONFIG,
+} from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { COLORS, createSunsetSkyDome, createSunDisc } from '../scene/setup';
 import { createEnvironmentLayer, type EnvironmentLayer } from './environmentLayer';
 import { WorldCollision } from '../collision';
@@ -17,7 +20,6 @@ export const HEIGHT_GRID_RES = 96;
 export const HEIGHT_RAY_LIFT = 80;
 
 export const MAP_URL = './maps/fruzer-polygon.glb';
-export const DRACO_DECODER_PATH = './draco/';
 const MAP_DOWNLOAD_TIMEOUT_MS = 45_000;
 
 export type MapQualityTier = 'low' | 'medium' | 'high';
@@ -277,7 +279,7 @@ function computeRobustBounds(root: THREE.Object3D, stride = 7): {
   return { box, sampleCount: cxs.length };
 }
 
-interface HeightTools {
+export interface HeightTools {
   getGroundHeight: (x: number, z: number) => number;
   /** Open air (meters) above ground before a ceiling hit; large if open sky */
   probeClearance: (x: number, z: number, groundY: number) => number;
@@ -285,7 +287,66 @@ interface HeightTools {
   probeSurfaceMat: (x: number, z: number) => string;
 }
 
-function buildHeightTools(
+/**
+ * Bucket map meshes by their world-space XZ bounds before terrain sampling.
+ * Raycasting the whole GLB for every scenery point made startup scale with
+ * meshes × samples (thousands of rays over ~1,400 meshes on Fruzer).
+ */
+function buildRaycastBuckets(colliders: THREE.Object3D[], bounds: THREE.Box3) {
+  const resolution = THREE.MathUtils.clamp(Math.ceil(Math.sqrt(colliders.length)), 8, 32);
+  const buckets = Array.from(
+    { length: resolution * resolution },
+    () => [] as THREE.Object3D[],
+  );
+  const spanX = Math.max(1e-3, bounds.max.x - bounds.min.x);
+  const spanZ = Math.max(1e-3, bounds.max.z - bounds.min.z);
+  const box = new THREE.Box3();
+
+  const cellX = (x: number) =>
+    Math.floor(
+      THREE.MathUtils.clamp((x - bounds.min.x) / spanX, 0, 0.999999) * resolution,
+    );
+  const cellZ = (z: number) =>
+    Math.floor(
+      THREE.MathUtils.clamp((z - bounds.min.z) / spanZ, 0, 0.999999) * resolution,
+    );
+
+  for (const object of colliders) {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry) continue;
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    if (!mesh.geometry.boundingBox) continue;
+
+    box.copy(mesh.geometry.boundingBox).applyMatrix4(mesh.matrixWorld);
+    if (
+      box.max.x < bounds.min.x ||
+      box.min.x > bounds.max.x ||
+      box.max.z < bounds.min.z ||
+      box.min.z > bounds.max.z
+    ) {
+      continue;
+    }
+
+    const minIx = cellX(box.min.x);
+    const maxIx = cellX(box.max.x);
+    const minIz = cellZ(box.min.z);
+    const maxIz = cellZ(box.max.z);
+    for (let iz = minIz; iz <= maxIz; iz++) {
+      for (let ix = minIx; ix <= maxIx; ix++) {
+        buckets[iz * resolution + ix].push(object);
+      }
+    }
+  }
+
+  return {
+    candidatesAt(x: number, z: number): THREE.Object3D[] {
+      return buckets[cellZ(z) * resolution + cellX(x)];
+    },
+    resolution,
+  };
+}
+
+export function buildHeightTools(
   colliders: THREE.Object3D[],
   bounds: THREE.Box3,
   fallbackY: number,
@@ -303,6 +364,7 @@ function buildHeightTools(
   const spanX = Math.max(1e-3, maxX - minX);
   const spanZ = Math.max(1e-3, maxZ - minZ);
   const rayTop = bounds.max.y + HEIGHT_RAY_LIFT;
+  const spatialIndex = buildRaycastBuckets(colliders, bounds);
 
   const cache = new Float32Array(res * res);
   const filled = new Uint8Array(res * res);
@@ -312,7 +374,7 @@ function buildHeightTools(
     origin.set(x, rayTop, z);
     raycaster.set(origin, down);
     raycaster.far = rayTop - bounds.min.y + 40;
-    return raycaster.intersectObjects(colliders, false);
+    return raycaster.intersectObjects(spatialIndex.candidatesAt(x, z), false);
   };
 
   const sampleRaw = (x: number, z: number): number => {
@@ -355,7 +417,7 @@ function buildHeightTools(
     origin.set(x, groundY + 0.75, z);
     raycaster.set(origin, up);
     raycaster.far = Math.max(SPAWN_CLEARANCE + 80, rayTop - groundY);
-    const hits = raycaster.intersectObjects(colliders, false);
+    const hits = raycaster.intersectObjects(spatialIndex.candidatesAt(x, z), false);
     if (hits.length === 0) return 999;
     return Math.max(0, hits[0].point.y - groundY);
   };
@@ -368,6 +430,10 @@ function buildHeightTools(
     return (mat as THREE.Material)?.name || '';
   };
 
+  console.info('[map] terrain spatial index', {
+    meshes: colliders.length,
+    cells: spatialIndex.resolution * spatialIndex.resolution,
+  });
   return { getGroundHeight, probeClearance, probeSurfaceMat };
 }
 
@@ -541,7 +607,10 @@ export async function loadMapWorld(
   };
 
   const draco = new DRACOLoader();
-  draco.setDecoderPath(DRACO_DECODER_PATH);
+  // Three exposes Vite-resolved glTF decoder URLs, including the WASM binary.
+  // Do not override these with public/draco: that directory has no .wasm and
+  // forced a failed request / slow JavaScript decode on every cold boot.
+  draco.setDecoderPath(DRACO_GLTF_CONFIG);
 
   const loader = new GLTFLoader();
   loader.setDRACOLoader(draco);
