@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import {
+  DRACOLoader,
+  DRACO_GLTF_CONFIG,
+} from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { COLORS, createSunsetSkyDome, createSunDisc } from '../scene/setup';
 import { createEnvironmentLayer, type EnvironmentLayer } from './environmentLayer';
 import { WorldCollision } from '../collision';
@@ -17,7 +20,6 @@ export const HEIGHT_GRID_RES = 96;
 export const HEIGHT_RAY_LIFT = 80;
 
 export const MAP_URL = './maps/fruzer-polygon.glb';
-export const DRACO_DECODER_PATH = './draco/';
 const MAP_DOWNLOAD_TIMEOUT_MS = 45_000;
 
 export type MapQualityTier = 'low' | 'medium' | 'high';
@@ -605,7 +607,10 @@ export async function loadMapWorld(
   };
 
   const draco = new DRACOLoader();
-  draco.setDecoderPath(DRACO_DECODER_PATH);
+  // Three exposes Vite-resolved glTF decoder URLs, including the WASM binary.
+  // Do not override these with public/draco: that directory has no .wasm and
+  // forced a failed request / slow JavaScript decode on every cold boot.
+  draco.setDecoderPath(DRACO_GLTF_CONFIG);
 
   const loader = new GLTFLoader();
   loader.setDRACOLoader(draco);
