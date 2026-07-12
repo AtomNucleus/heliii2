@@ -10,7 +10,7 @@ TypeScript / Three.js / Vite game sources are in place. This branch includes pro
 
 ## Play
 
-**Live:** https://idyllic-marshmallow-327b2e.netlify.app
+**Live:** https://lucky-buttercream-ca530e.netlify.app
 
 Public deploy (no password). Claim it into your Netlify account soon so it is not suspended — see `NETLIFY_DEPLOY.md`.
 
