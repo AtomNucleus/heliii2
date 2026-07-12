@@ -10,7 +10,7 @@ TypeScript / Three.js / Vite game sources are in place. This branch includes pro
 
 ## Play
 
-**Live:** https://gorgeous-cat-e4edf9.netlify.app
+**Live:** https://genuine-khapse-40e5e6.netlify.app
 
 Public deploy (no password). Claim it into your Netlify account soon so it is not suspended — see `NETLIFY_DEPLOY.md`.
 
