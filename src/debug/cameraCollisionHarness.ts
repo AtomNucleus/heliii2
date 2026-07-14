@@ -146,20 +146,31 @@ const wallMaterial = new THREE.MeshStandardMaterial({
   roughness: 0.42,
   metalness: 0.18,
 });
+const perimeterMaterial = new THREE.MeshBasicMaterial({
+  color: 0xff315f,
+  transparent: true,
+  opacity: 0.09,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
 for (const box of hash.all()) {
   const size = new THREE.Vector3(
     box.maxX - box.minX,
     box.maxY - box.minY,
     box.maxZ - box.minZ,
   );
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), wallMaterial);
+  const isPerimeter = box.tag === 'camera-perimeter';
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(size.x, size.y, size.z),
+    isPerimeter ? perimeterMaterial : wallMaterial,
+  );
   mesh.position.set(
     (box.minX + box.maxX) / 2,
     (box.minY + box.maxY) / 2,
     (box.minZ + box.maxZ) / 2,
   );
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
+  mesh.castShadow = !isPerimeter;
+  mesh.receiveShadow = !isPerimeter;
   scene.add(mesh);
   const edges = new THREE.LineSegments(
     new THREE.EdgesGeometry(mesh.geometry),

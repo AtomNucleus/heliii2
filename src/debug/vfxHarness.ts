@@ -221,7 +221,9 @@ const fxVisible = burstCount + smokeCount + tracerCount + debrisCount;
 const expectsExplosion = scenario === 'explosion' || scenario === 'quality-low';
 const harnessPass = expectsExplosion
   ? burstCount > 0 && smokeCount > 0 && fxVisible > 2
-  : tracerCount > 0;
+  : scenario === 'tracers'
+    ? tracerCount > 0
+    : fxVisible > 0;
 
 Object.assign(app.dataset, {
   harnessReady: '1',
