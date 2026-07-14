@@ -99,6 +99,7 @@ const requested = params.get('scenario') as ScenarioId | null;
 const scenario = SCENARIOS[requested ?? 'wall-block'] ?? SCENARIOS['wall-block'];
 const frames = Math.max(1, Math.min(240, Number(params.get('frames')) || 60));
 const dt = Math.max(1 / 240, Math.min(0.1, Number(params.get('dt')) || 1 / 60));
+const viewChase = params.get('view') === 'chase';
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -202,10 +203,58 @@ rotor.position.y = 1.55;
 heli.add(rotor);
 scene.add(heli);
 
-const chaseCamera = new THREE.PerspectiveCamera(54, 16 / 9, 0.1, 300);
+// near=0.5 matches the real game camera (src/scene/setup.ts)
+const chaseCamera = new THREE.PerspectiveCamera(54, 16 / 9, 0.5, 300);
 const chaseState = createChaseCameraState(scenario.heli);
 if (scenario.id === 'lag-through-wall') {
   chaseState.camSmooth.set(0, 18, -38);
+}
+
+function sphereInsideSolid(position: THREE.Vector3): boolean {
+  for (const box of hash.all()) {
+    const x = THREE.MathUtils.clamp(position.x, box.minX, box.maxX);
+    const y = THREE.MathUtils.clamp(position.y, box.minY, box.maxY);
+    const z = THREE.MathUtils.clamp(position.z, box.minZ, box.maxZ);
+    const distanceSq =
+      (position.x - x) ** 2 + (position.y - y) ** 2 + (position.z - z) ** 2;
+    if (distanceSq < CAMERA_OCCLUSION.radius ** 2 - 1e-4) return true;
+  }
+  return false;
+}
+
+function isPastRim(position: THREE.Vector3): boolean {
+  return (
+    Math.abs(position.x) > scenario.halfExtent + 0.01 ||
+    Math.abs(position.z) > scenario.halfExtent + 0.01
+  );
+}
+
+/** Signed distance to AABB surface, then minus camera sphere radius. */
+function minWallClearance(position: THREE.Vector3): number {
+  let minClearance = Infinity;
+  for (const box of hash.all()) {
+    const qx = THREE.MathUtils.clamp(position.x, box.minX, box.maxX);
+    const qy = THREE.MathUtils.clamp(position.y, box.minY, box.maxY);
+    const qz = THREE.MathUtils.clamp(position.z, box.minZ, box.maxZ);
+    const dx = position.x - qx;
+    const dy = position.y - qy;
+    const dz = position.z - qz;
+    const distSq = dx * dx + dy * dy + dz * dz;
+    let distToSurface: number;
+    if (distSq > 1e-10) {
+      distToSurface = Math.sqrt(distSq);
+    } else {
+      const toMinX = position.x - box.minX;
+      const toMaxX = box.maxX - position.x;
+      const toMinY = position.y - box.minY;
+      const toMaxY = box.maxY - position.y;
+      const toMinZ = position.z - box.minZ;
+      const toMaxZ = box.maxZ - position.z;
+      distToSurface = -Math.min(toMinX, toMaxX, toMinY, toMaxY, toMinZ, toMaxZ);
+    }
+    minClearance = Math.min(minClearance, distToSurface - CAMERA_OCCLUSION.radius);
+  }
+  return minClearance;
 }
 
 let everOccluded = false;
@@ -217,6 +266,7 @@ const occlusion: ChaseCameraOcclusion = {
   },
 };
 
+let frameViolations = 0;
 for (let i = 0; i < frames; i++) {
   updateChaseCamera(
     chaseState,
@@ -232,27 +282,33 @@ for (let i = 0; i < frames; i++) {
     dt,
     occlusion,
   );
+  if (sphereInsideSolid(chaseCamera.position) || isPastRim(chaseCamera.position)) {
+    frameViolations++;
+  }
 }
 
 const pivot = scenario.heli.clone();
 pivot.y += 1.4;
-const cameraMarker = new THREE.Mesh(
-  new THREE.SphereGeometry(CAMERA_OCCLUSION.radius, 18, 12),
-  new THREE.MeshStandardMaterial({
-    color: 0xff9c58,
-    emissive: 0x8c2c09,
-    roughness: 0.22,
-  }),
-);
-cameraMarker.position.copy(chaseCamera.position);
-scene.add(cameraMarker);
 
-const armGeometry = new THREE.BufferGeometry().setFromPoints([pivot, chaseCamera.position]);
-const arm = new THREE.Line(
-  armGeometry,
-  new THREE.LineBasicMaterial({ color: everOccluded ? 0xffd166 : 0x68fff2 }),
-);
-scene.add(arm);
+if (!viewChase) {
+  const cameraMarker = new THREE.Mesh(
+    new THREE.SphereGeometry(CAMERA_OCCLUSION.radius, 18, 12),
+    new THREE.MeshStandardMaterial({
+      color: 0xff9c58,
+      emissive: 0x8c2c09,
+      roughness: 0.22,
+    }),
+  );
+  cameraMarker.position.copy(chaseCamera.position);
+  scene.add(cameraMarker);
+
+  const armGeometry = new THREE.BufferGeometry().setFromPoints([pivot, chaseCamera.position]);
+  const arm = new THREE.Line(
+    armGeometry,
+    new THREE.LineBasicMaterial({ color: everOccluded ? 0xffd166 : 0x68fff2 }),
+  );
+  scene.add(arm);
+}
 
 const pivotMarker = new THREE.Mesh(
   new THREE.SphereGeometry(0.45, 14, 10),
@@ -261,25 +317,14 @@ const pivotMarker = new THREE.Mesh(
 pivotMarker.position.copy(pivot);
 scene.add(pivotMarker);
 
-function sphereInsideSolid(position: THREE.Vector3): boolean {
-  for (const box of hash.all()) {
-    const x = THREE.MathUtils.clamp(position.x, box.minX, box.maxX);
-    const y = THREE.MathUtils.clamp(position.y, box.minY, box.maxY);
-    const z = THREE.MathUtils.clamp(position.z, box.minZ, box.maxZ);
-    const distanceSq =
-      (position.x - x) ** 2 + (position.y - y) ** 2 + (position.z - z) ** 2;
-    if (distanceSq < CAMERA_OCCLUSION.radius ** 2 - 1e-4) return true;
-  }
-  return false;
-}
-
 const insideSolid = sphereInsideSolid(chaseCamera.position);
-const pastRim =
-  Math.abs(chaseCamera.position.x) > scenario.halfExtent + 0.01 ||
-  Math.abs(chaseCamera.position.z) > scenario.halfExtent + 0.01;
+const pastRim = isPastRim(chaseCamera.position);
+const wallClearance = minWallClearance(chaseCamera.position);
 const scenarioPass =
   !insideSolid &&
   !pastRim &&
+  frameViolations === 0 &&
+  wallClearance > -0.01 &&
   (scenario.expectOccluded ? everOccluded : !everOccluded);
 
 Object.assign(app.dataset, {
@@ -293,6 +338,8 @@ Object.assign(app.dataset, {
   camX: chaseCamera.position.x.toFixed(3),
   camY: chaseCamera.position.y.toFixed(3),
   camZ: chaseCamera.position.z.toFixed(3),
+  frameViolations: String(frameViolations),
+  camWallClearance: Number.isFinite(wallClearance) ? wallClearance.toFixed(3) : 'Infinity',
   perimeterCount: String(hash.all().filter((b) => b.tag === 'camera-perimeter').length),
 });
 status.textContent = [
@@ -301,6 +348,8 @@ status.textContent = [
   `CAMERA    ${chaseCamera.position.toArray().map((v) => v.toFixed(2)).join(', ')}`,
   `OCCLUDED  ${everOccluded ? 'YES' : 'NO'}   INSIDE SOLID  ${insideSolid ? 'YES' : 'NO'}`,
   `RIM       ${pastRim ? 'OUTSIDE' : 'CLEAR'}   FIXED STEPS  ${frames}`,
+  `FRAME VIO ${frameViolations}   CLEARANCE  ${Number.isFinite(wallClearance) ? wallClearance.toFixed(3) : 'inf'}`,
+  `VIEW      ${viewChase ? 'CHASE' : 'OBSERVER'}`,
 ].join('\n');
 
 const observer = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.1, 500);
@@ -312,11 +361,22 @@ if (scenario.id.startsWith('rim') || scenario.id === 'corner-yaw') {
 observer.lookAt(focus);
 
 rotor.rotation.y = Math.PI / 8;
-renderer.render(scene, observer);
+
+const renderCamera = viewChase ? chaseCamera : observer;
+if (viewChase) {
+  chaseCamera.aspect = innerWidth / innerHeight;
+  chaseCamera.updateProjectionMatrix();
+}
+renderer.render(scene, renderCamera);
 
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight, false);
-  observer.aspect = innerWidth / innerHeight;
-  observer.updateProjectionMatrix();
-  renderer.render(scene, observer);
+  if (viewChase) {
+    chaseCamera.aspect = innerWidth / innerHeight;
+    chaseCamera.updateProjectionMatrix();
+  } else {
+    observer.aspect = innerWidth / innerHeight;
+    observer.updateProjectionMatrix();
+  }
+  renderer.render(scene, renderCamera);
 });

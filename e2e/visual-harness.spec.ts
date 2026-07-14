@@ -18,6 +18,7 @@ test.describe('deterministic visual harnesses', () => {
       await expect(app).toHaveAttribute('data-harness-pass', '1');
       await expect(app).toHaveAttribute('data-cam-inside-solid', '0');
       await expect(app).toHaveAttribute('data-cam-past-rim', '0');
+      await expect(app).toHaveAttribute('data-frame-violations', '0');
 
       const expectedOccluded = scenario === 'clear-arm' ? '0' : '1';
       await expect(app).toHaveAttribute('data-cam-occluded', expectedOccluded);
@@ -39,6 +40,28 @@ test.describe('deterministic visual harnesses', () => {
     await expect(app).toHaveAttribute('data-harness-pass', '1');
     await expect(app).toHaveAttribute('data-perimeter-count', '4');
     await expect(page.locator('#game-canvas')).toHaveScreenshot('camera-perimeter.png', {
+      animations: 'disabled',
+      maxDiffPixelRatio: 0.02,
+    });
+  });
+
+  test('camera POV thin-wall chase view matches visual baseline', async ({ page }) => {
+    await page.goto('/camera-harness.html?scenario=thin-wall-tunnel&frames=60&view=chase');
+    const app = page.locator('#app');
+    await expect(app).toHaveAttribute('data-harness-pass', '1');
+    await expect(app).toHaveAttribute('data-frame-violations', '0');
+    await expect(page.locator('#game-canvas')).toHaveScreenshot('camera-pov-thin-wall.png', {
+      animations: 'disabled',
+      maxDiffPixelRatio: 0.02,
+    });
+  });
+
+  test('camera POV perimeter chase view matches visual baseline', async ({ page }) => {
+    await page.goto('/camera-harness.html?scenario=rim-perimeter&frames=60&view=chase');
+    const app = page.locator('#app');
+    await expect(app).toHaveAttribute('data-harness-pass', '1');
+    await expect(app).toHaveAttribute('data-frame-violations', '0');
+    await expect(page.locator('#game-canvas')).toHaveScreenshot('camera-pov-perimeter.png', {
       animations: 'disabled',
       maxDiffPixelRatio: 0.02,
     });

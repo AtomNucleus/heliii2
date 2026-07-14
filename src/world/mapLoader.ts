@@ -723,6 +723,20 @@ export async function loadMapWorld(
     tier,
   });
 
+  // Camera-only occluders from procedural env (city / districts / landmarks).
+  // Env group has identity transform; world matrices are valid at origin.
+  if (collision) {
+    const occluders = environment.getCameraOccluders();
+    for (const box of occluders) {
+      collision.registerCollider({
+        ...box,
+        kind: 'building',
+        tag: 'camera-env',
+      });
+    }
+    console.info('[map] camera env occluders', occluders.length);
+  }
+
   scene.add(group);
 
   draco.dispose();
