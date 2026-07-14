@@ -17,6 +17,11 @@ export const CAMERA = {
   boostDistPull: 0.88,
   shakeDecay: 4.2,
   shakeMax: 1.25,
+  /**
+   * When the spring-arm is blocked, damp lateral bank offset so the camera
+   * doesn't keep swinging into the wall during yaw turns.
+   */
+  occludedRollMul: 0.35,
 } as const;
 
 export interface CameraShakeState {
@@ -43,6 +48,8 @@ export interface ChaseCameraState {
   lookSmooth: THREE.Vector3;
   currentFov: number;
   shake: CameraShakeState;
+  /** 0..1 how hard the arm is currently clipped (for lag / roll damping). */
+  occlusion: number;
   /** Scratch vectors — reused every frame to avoid GC. */
   _camPos: THREE.Vector3;
   _look: THREE.Vector3;
@@ -51,6 +58,7 @@ export interface ChaseCameraState {
   _forward: THREE.Vector3;
   _velDir: THREE.Vector3;
   _shakeOffset: THREE.Vector3;
+  _pivot: THREE.Vector3;
 }
 
 export function createChaseCameraState(spawn: THREE.Vector3): ChaseCameraState {
@@ -59,6 +67,7 @@ export function createChaseCameraState(spawn: THREE.Vector3): ChaseCameraState {
     lookSmooth: spawn.clone(),
     currentFov: CAMERA.baseFov,
     shake: createShakeState(),
+    occlusion: 0,
     _camPos: new THREE.Vector3(),
     _look: new THREE.Vector3(),
     _back: new THREE.Vector3(),
@@ -66,6 +75,7 @@ export function createChaseCameraState(spawn: THREE.Vector3): ChaseCameraState {
     _forward: new THREE.Vector3(),
     _velDir: new THREE.Vector3(),
     _shakeOffset: new THREE.Vector3(),
+    _pivot: new THREE.Vector3(),
   };
 }
 
@@ -74,11 +84,21 @@ export function resetChaseCamera(state: ChaseCameraState, spawn: THREE.Vector3):
   state.lookSmooth.copy(spawn);
   state.currentFov = CAMERA.baseFov;
   state.shake.trauma = 0;
+  state.occlusion = 0;
+}
+
+/** Optional world collision / map-edge clamp for the chase arm. */
+export interface ChaseCameraOcclusion {
+  /**
+   * Mutates `desired` so the camera stays clear of solids between pivot→desired.
+   * Returns true when the arm was shortened / pushed.
+   */
+  resolve: (pivot: THREE.Vector3, desired: THREE.Vector3) => boolean;
 }
 
 /**
  * Dynamic chase camera: speed-based distance/FOV, velocity look-ahead,
- * attitude lean, lag smoothing, and trauma-based shake.
+ * attitude lean, lag smoothing, trauma-based shake, and wall occlusion.
  */
 export function updateChaseCamera(
   state: ChaseCameraState,
@@ -92,6 +112,7 @@ export function updateChaseCamera(
   boosting: boolean,
   maxSpeed: number,
   dt: number,
+  occlusion?: ChaseCameraOcclusion | null,
 ): void {
   const speedRatio = THREE.MathUtils.clamp(speed / maxSpeed, 0, 1.35);
   let distance = THREE.MathUtils.lerp(
@@ -111,12 +132,23 @@ export function updateChaseCamera(
   const right = state._right.set(Math.cos(yaw), 0, -Math.sin(yaw));
   const forward = state._forward.set(Math.sin(yaw), 0, Math.cos(yaw));
 
+  // Reduce bank offset when already pressed against geometry
+  const rollMul = THREE.MathUtils.lerp(1, CAMERA.occludedRollMul, state.occlusion);
+
   // Offset with roll for cinematic bank follow
   const camPos = state._camPos
     .copy(heliPos)
     .addScaledVector(back, distance)
-    .addScaledVector(right, roll * distance * CAMERA.rollInfluence);
+    .addScaledVector(right, roll * distance * CAMERA.rollInfluence * rollMul);
   camPos.y += height;
+
+  const pivot = state._pivot.copy(heliPos);
+  pivot.y += CAMERA.lookHeight;
+
+  let occluded = false;
+  if (occlusion) {
+    occluded = occlusion.resolve(pivot, camPos);
+  }
 
   const look = state._look.copy(heliPos);
   look.y += CAMERA.lookHeight - pitch * 2.2;
@@ -129,14 +161,30 @@ export function updateChaseCamera(
     look.addScaledVector(velDir, 2.2 * speedRatio);
   }
   // Slight look into the bank
-  look.addScaledVector(right, -roll * 2.5);
+  look.addScaledVector(right, -roll * 2.5 * rollMul);
 
-  const posLag = boosting ? CAMERA.posLag * 0.78 : CAMERA.posLag;
+  // Track occlusion amount for roll damping / snappier recovery
+  const idealDist = Math.max(1e-3, distance);
+  const actualDist = camPos.distanceTo(pivot);
+  const clipAmount = occluded
+    ? THREE.MathUtils.clamp(1 - actualDist / idealDist, 0, 1)
+    : 0;
+  state.occlusion = THREE.MathUtils.damp(state.occlusion, clipAmount, 10, dt);
+
+  // Follow snappier when clipped so the arm doesn't lerp through walls
+  const posLag =
+    (boosting ? CAMERA.posLag * 0.78 : CAMERA.posLag) *
+    (1 + state.occlusion * 1.6);
   const lookLag = boosting ? CAMERA.lookLag * 0.88 : CAMERA.lookLag;
   // Lag slightly more when slow for a weighty hover feel
   const hoverLagMul = 1 - speedRatio * 0.15;
   state.camSmooth.lerp(camPos, 1 - Math.exp(-posLag * hoverLagMul * dt));
   state.lookSmooth.lerp(look, 1 - Math.exp(-lookLag * dt));
+
+  // Hard clamp the smoothed pose too — lag arcs otherwise swing into walls
+  if (occlusion) {
+    occlusion.resolve(pivot, state.camSmooth);
+  }
 
   // FOV speed feedback
   const targetFov =
@@ -152,19 +200,27 @@ export function updateChaseCamera(
   const shakeAmp = updateShake(state.shake, dt);
   const shakeOffset = state._shakeOffset.set(0, 0, 0);
   if (shakeAmp > 0.001) {
+    // Scale shake down when pressed against geometry so trauma can't shove
+    // the lens back into a wall after occlusion resolve.
+    const shakeScale = 1 - state.occlusion * 0.85;
     const t = performance.now() * 0.001;
+    const amp = shakeAmp * shakeScale;
     shakeOffset.set(
-      Math.sin(t * 37.1) * shakeAmp,
-      Math.cos(t * 29.7) * shakeAmp * 0.72,
-      Math.sin(t * 41.3) * shakeAmp * 0.5,
+      Math.sin(t * 37.1) * amp,
+      Math.cos(t * 29.7) * amp * 0.72,
+      Math.sin(t * 41.3) * amp * 0.5,
     );
   }
 
   camera.position.copy(state.camSmooth).add(shakeOffset);
+  // Re-clamp after shake so the final lens pose never rests inside solids
+  if (occlusion && shakeOffset.lengthSq() > 1e-6) {
+    occlusion.resolve(pivot, camera.position);
+  }
   camera.lookAt(state.lookSmooth);
 
   // Subtle bank lean after lookAt (does not fight look direction much)
-  camera.rotateZ(roll * CAMERA.bankLean);
+  camera.rotateZ(roll * CAMERA.bankLean * rollMul);
 }
 
 /** Public hook helpers for external systems (collisions, ring hits, etc.). */

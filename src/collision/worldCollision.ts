@@ -28,6 +28,12 @@ import type {
   ProximityWarning,
   WorldImpactResult,
 } from './types';
+import {
+  clampCameraToWorldBound,
+  createPerimeterWalls,
+  resolveCameraOcclusion,
+  type CameraOcclusionResult,
+} from './cameraOcclusion';
 
 export interface WorldCollisionOptions extends ExtractOptions {
   cellSize?: number;
@@ -348,6 +354,54 @@ export class WorldCollision {
     );
 
     return result;
+  }
+
+  /**
+   * Spring-arm style chase-camera clamp: pull `desired` toward `pivot`
+   * when buildings/props (including perimeter rim slabs) block the arm.
+   * `cameraBound` should be the visual map half-extent (not heli soft bound).
+   */
+  resolveCameraPosition(
+    pivot: THREE.Vector3,
+    desired: THREE.Vector3,
+    cameraBound?: number,
+  ): CameraOcclusionResult {
+    const result = resolveCameraOcclusion(pivot, desired, this.hash);
+    let hit = result.hit;
+    let t = result.t;
+
+    if (cameraBound !== undefined && cameraBound > 0) {
+      const beforeX = desired.x;
+      const beforeZ = desired.z;
+      clampCameraToWorldBound(desired, cameraBound);
+      const rimHit = desired.x !== beforeX || desired.z !== beforeZ;
+      if (rimHit) {
+        hit = true;
+        const again = resolveCameraOcclusion(pivot, desired, this.hash);
+        if (again.hit) {
+          t = Math.min(t, again.t);
+        }
+      }
+    }
+
+    return { hit, t };
+  }
+
+  /**
+   * Register four rim slabs at ±halfExtent so edge turns always occlude
+   * the chase arm (fence/glass meshes are often skipped during bake).
+   */
+  ensurePerimeterWalls(halfExtent: number, height?: number): number {
+    const existing = this.hash.all();
+    for (let i = 0; i < existing.length; i++) {
+      if (existing[i].tag === 'camera-perimeter') return 0;
+    }
+    const walls = createPerimeterWalls(halfExtent, height);
+    for (const w of walls) {
+      this.hash.addCollider(w);
+    }
+    this.debug.setHash(this.hash);
+    return walls.length;
   }
 
   getLastResult(): WorldImpactResult | null {

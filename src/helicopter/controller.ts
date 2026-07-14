@@ -126,6 +126,8 @@ export class HelicopterController {
   private camState: ChaseCameraState;
   private damage: DamageState = { health: 100, lastImpact: 0, totalDamage: 0 };
   private worldBound = 105;
+  /** Visual map half-extent used for chase-camera rim clamp (tighter than heli soft bound). */
+  private cameraBound = 105;
   private maxAltitude = 200;
   private boundPressure = 0;
   private worldCollision: WorldCollision | null = null;
@@ -137,6 +139,21 @@ export class HelicopterController {
   private steeringSensitivity = 1;
   /** Camera shake scale (0 when reduced motion). */
   private shakeScale = 1;
+  /** Stable chase-camera occlusion hook (avoids per-frame alloc). */
+  private readonly cameraOcclusion = {
+    resolve: (pivot: THREE.Vector3, desired: THREE.Vector3): boolean => {
+      const collision = this.worldCollision;
+      if (collision) {
+        return collision.resolveCameraPosition(pivot, desired, this.cameraBound).hit;
+      }
+      const beforeX = desired.x;
+      const beforeZ = desired.z;
+      const limit = Math.max(8, this.cameraBound - 1.5);
+      desired.x = THREE.MathUtils.clamp(desired.x, -limit, limit);
+      desired.z = THREE.MathUtils.clamp(desired.z, -limit, limit);
+      return desired.x !== beforeX || desired.z !== beforeZ;
+    },
+  };
 
   private mainRotor: THREE.Object3D | null = null;
   private tailRotor: THREE.Object3D | null = null;
@@ -265,6 +282,11 @@ export class HelicopterController {
   /** Soft clamp half-extent for XZ (map-dependent) */
   setWorldBound(halfExtent: number) {
     this.worldBound = halfExtent;
+  }
+
+  /** Visual map half-extent for chase-camera rim occlusion (tighter than heli soft bound). */
+  setCameraBound(halfExtent: number) {
+    this.cameraBound = Math.max(8, halfExtent);
   }
 
   setMaxAltitude(y: number) {
@@ -599,6 +621,7 @@ export class HelicopterController {
       this.boost.active,
       FLIGHT.maxSpeed,
       dt,
+      this.cameraOcclusion,
     );
   }
 }

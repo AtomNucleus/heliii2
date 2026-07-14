@@ -628,6 +628,7 @@ async function boot() {
 
     controller = new HelicopterController(heli, camera, world.getGroundHeight);
     controller.setWorldBound(world.mapHalfExtent + 8);
+    controller.setCameraBound(world.mapHalfExtent);
     applySettingsToRuntime(getProfile().settings);
     if (typeof controller.setMaxAltitude === 'function') {
       controller.setMaxAltitude(Math.max(200, world.bounds.max.y + 80));

@@ -677,6 +677,12 @@ export async function loadMapWorld(
       minFootprint: 2.2,
     });
     collision.setGroundHeightSampler(getGroundHeight);
+    // Rim slabs so chase-cam occlusion works at map edges even when fence
+    // meshes were filtered out of the bake.
+    const rim = collision.ensurePerimeterWalls(mapHalfExtent);
+    if (rim > 0) {
+      console.info('[collision] perimeter camera walls', { count: rim, mapHalfExtent });
+    }
   } catch (err) {
     console.warn('[map] building collision bake failed', err);
   }

@@ -149,6 +149,8 @@ export function queryDeepestContact(
   for (let i = 0; i < count; i++) {
     const box = hash.getCollider(_queryIds[i]);
     if (!box) continue;
+    // Camera-only rim slabs — never resolve against the heli body
+    if (box.tag === 'camera-perimeter') continue;
     // Cheap Y reject
     if (_center.y + r < box.minY || _center.y - r > box.maxY) continue;
     if (_center.x + r < box.minX || _center.x - r > box.maxX) continue;
@@ -202,6 +204,7 @@ export function applyNearGroundAssist(
     for (let i = 0; i < count; i++) {
       const box = hash.getCollider(_queryIds[i]);
       if (!box) continue;
+      if (box.tag === 'camera-perimeter') continue;
       if (_center.x < box.minX - 0.5 || _center.x > box.maxX + 0.5) continue;
       if (_center.z < box.minZ - 0.5 || _center.z > box.maxZ + 0.5) continue;
       // Only consider tops below the craft
