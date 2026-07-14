@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { detectEnvTier, getEnvBudget, type EnvBudget, type EnvQualityTier } from './envBudget';
-import { createCityDressing, type CityDressingHandle } from './cityDressing';
+import { createCityDressing, type CameraOccluderBox, type CityDressingHandle } from './cityDressing';
 import { createVegetation, type VegetationHandle } from './vegetation';
 import { createRoadsProps, type RoadsPropsHandle } from './roadsProps';
 import { createLandmarks, type LandmarkHandle } from './landmarks';
@@ -12,6 +12,13 @@ import { createOceanDressing, type OceanDressingHandle } from './oceanDressing';
 import { createCoastline, type CoastlineHandle } from './coastline';
 
 export type { CombatSpace, DistrictInfo, EnvBudget, EnvQualityTier };
+export type { CameraOccluderBox };
+
+/** Soft cap so the spatial hash stays cheap for chase-camera queries. */
+const CAMERA_OCCLUDER_CAP = 600;
+const MIN_OCCLUDER_HEIGHT = 2.5;
+const MIN_OCCLUDER_FOOTPRINT = 3;
+const PLANE_HEIGHT_SKIP = 0.3;
 
 export interface EnvironmentLayerOptions {
   getGroundHeight: (x: number, z: number) => number;
@@ -185,6 +192,49 @@ export class EnvironmentLayer {
 
   getDistrict(kind: DistrictInfo['kind']): DistrictInfo | undefined {
     return this.districts.find((d) => d.kind === kind);
+  }
+
+  /**
+   * World AABBs for chase-camera occlusion only (city analytics + district/landmark meshes).
+   * Not used for heli flight collision.
+   */
+  getCameraOccluders(): CameraOccluderBox[] {
+    const out: CameraOccluderBox[] = this.city.cameraOccluders.map((b) => ({ ...b }));
+
+    const scratch = new THREE.Box3();
+    const collectFrom = (root: THREE.Object3D) => {
+      root.updateWorldMatrix(true, true);
+      root.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        if ((mesh as THREE.InstancedMesh).isInstancedMesh) return;
+        scratch.setFromObject(mesh);
+        if (scratch.isEmpty()) return;
+        const height = scratch.max.y - scratch.min.y;
+        if (height < PLANE_HEIGHT_SKIP) return; // planes / decals
+        if (height < MIN_OCCLUDER_HEIGHT) return;
+        const sx = scratch.max.x - scratch.min.x;
+        const sz = scratch.max.z - scratch.min.z;
+        if (sx * sz < MIN_OCCLUDER_FOOTPRINT) return;
+        out.push({
+          minX: scratch.min.x,
+          minY: scratch.min.y,
+          minZ: scratch.min.z,
+          maxX: scratch.max.x,
+          maxY: scratch.max.y,
+          maxZ: scratch.max.z,
+        });
+      });
+    };
+
+    collectFrom(this.districtLayer.group);
+    collectFrom(this.landmarks.group);
+
+    if (out.length <= CAMERA_OCCLUDER_CAP) return out;
+
+    // Prefer tallest boxes when capping
+    out.sort((a, b) => b.maxY - b.minY - (a.maxY - a.minY));
+    return out.slice(0, CAMERA_OCCLUDER_CAP);
   }
 
   update(dt: number, time: number) {

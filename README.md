@@ -10,7 +10,7 @@ TypeScript / Three.js / Vite game sources are in place. This branch includes pro
 
 ## Play
 
-**Live:** https://lucky-buttercream-ca530e.netlify.app
+**Live:** https://melodic-cajeta-e03bd7.netlify.app
 
 Public deploy (no password). Claim it into your Netlify account soon so it is not suspended — see `NETLIFY_DEPLOY.md`.
 
@@ -117,8 +117,20 @@ npm run test:pwa         # PWA update/install policy only
 npm run test:physics     # Rapier debris budget / fragment / lifecycle policies
 npm run test:collision   # collision math verification
 npm run test:mission     # mission authoring verification
+npm run test:visual      # deterministic camera + VFX state/screenshot regression
+npm run test:visual:update # intentionally regenerate approved visual baselines
 npm run smoke-test       # Playwright Chromium smoke (needs build + browser)
 ```
+
+Visual harnesses are also directly inspectable after `npm run dev`:
+
+- `/camera-harness.html?scenario=thin-wall-tunnel`
+- `/camera-harness.html?scenario=rim-perimeter`
+- `/vfx-harness.html?scenario=explosion`
+- `/vfx-harness.html?scenario=tracers`
+
+Each harness uses fixed simulation steps and seeded effects, publishes pass/fail
+metrics on `#app`, and renders the production collision or combat-FX APIs.
 
 See `PHYSICS_VISUAL.md` for the Rapier debris + visual fidelity slice (what shipped vs deferred).
 

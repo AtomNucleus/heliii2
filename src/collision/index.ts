@@ -37,3 +37,13 @@ export {
   DebrisSystem,
   DESTRUCT,
 } from './destructible';
+export {
+  CAMERA_OCCLUSION,
+  rayAABBEnterT,
+  resolveCameraOcclusion,
+  pushCameraOutOfSolids,
+  clampCameraToWorldBound,
+  setCameraPivot,
+  createPerimeterWalls,
+} from './cameraOcclusion';
+export type { CameraOcclusionResult } from './cameraOcclusion';

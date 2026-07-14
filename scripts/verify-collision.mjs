@@ -248,4 +248,52 @@ const box = { minX: -2, minY: 0, minZ: -2, maxX: 2, maxY: 10, maxZ: 2 };
   assert(high.assist === 0 && high.vy === -20, 'no assist at altitude');
 }
 
+// Camera spring-arm: slab ray vs AABB (mirrors cameraOcclusion.rayAABBEnterT)
+function rayAABBEnterT(ox, oy, oz, dx, dy, dz, box, inflate = 0) {
+  const minX = box.minX - inflate;
+  const minY = box.minY - inflate;
+  const minZ = box.minZ - inflate;
+  const maxX = box.maxX + inflate;
+  const maxY = box.maxY + inflate;
+  const maxZ = box.maxZ + inflate;
+  let tMin = 0;
+  let tMax = 1;
+  const axis = (o, d, min, max) => {
+    if (Math.abs(d) < 1e-12) {
+      if (o < min || o > max) return false;
+      return true;
+    }
+    let t1 = (min - o) / d;
+    let t2 = (max - o) / d;
+    if (t1 > t2) {
+      const s = t1;
+      t1 = t2;
+      t2 = s;
+    }
+    tMin = Math.max(tMin, t1);
+    tMax = Math.min(tMax, t2);
+    return tMin <= tMax;
+  };
+  if (!axis(ox, dx, minX, maxX)) return null;
+  if (!axis(oy, dy, minY, maxY)) return null;
+  if (!axis(oz, dz, minZ, maxZ)) return null;
+  if (tMin <= 0 && tMax >= 0) return 0;
+  if (tMin < 0 || tMin > 1) return null;
+  return tMin;
+}
+
+{
+  const wall = { minX: 10, minY: 0, minZ: -5, maxX: 14, maxY: 20, maxZ: 5 };
+  assert(rayAABBEnterT(0, 5, 0, 5, 0, 0, wall) === null, 'short arm misses wall');
+  const t = rayAABBEnterT(0, 5, 0, 20, 0, 0, wall);
+  assert(t !== null && Math.abs(t - 0.5) < 1e-6, `arm hits at t=0.5 got ${t}`);
+  const inside = rayAABBEnterT(12, 5, 0, 10, 0, 0, wall);
+  assert(inside === 0, 'origin inside reports t=0');
+  const padded = rayAABBEnterT(0, 5, 0, 20, 0, 0, wall, 1.35);
+  assert(
+    padded !== null && Math.abs(padded - 8.65 / 20) < 1e-6,
+    `inflate should hit earlier got ${padded}`,
+  );
+}
+
 console.log('verify-collision: all checks passed');

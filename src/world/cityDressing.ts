@@ -9,8 +9,20 @@ import {
 } from './envUtil';
 import type { EnvBudget } from './envBudget';
 
+/** World-space AABB used as a chase-camera occluder (not heli physics). */
+export interface CameraOccluderBox {
+  minX: number;
+  minY: number;
+  minZ: number;
+  maxX: number;
+  maxY: number;
+  maxZ: number;
+}
+
 export interface CityDressingHandle {
   group: THREE.Group;
+  /** Analytic AABBs for main building bodies (bodies/bodiesB only). */
+  cameraOccluders: CameraOccluderBox[];
   setVisibleCount(buildings: number, rooftops: number): void;
   dispose(): void;
 }
@@ -72,6 +84,7 @@ export function createCityDressing(
   let ai = 0;
   const used: PlacementSample[] = [];
   const heights: number[] = [];
+  const cameraOccluders: CameraOccluderBox[] = [];
 
   for (const s of samples) {
     if (bi + biB >= maxB) break;
@@ -86,6 +99,20 @@ export function createCityDressing(
     heights.push(h);
     pos.set(s.x, s.y, s.z);
     scl.set(w, h, d);
+
+    // Yaw-rotated box AABB: buildingGeo is +0.5Y so span is [s.y, s.y+h]
+    const c = Math.abs(Math.cos(yaw));
+    const sn = Math.abs(Math.sin(yaw));
+    const halfX = (w * c + d * sn) * 0.5;
+    const halfZ = (w * sn + d * c) * 0.5;
+    cameraOccluders.push({
+      minX: s.x - halfX,
+      minY: s.y,
+      minZ: s.z - halfZ,
+      maxX: s.x + halfX,
+      maxY: s.y + h,
+      maxZ: s.z + halfZ,
+    });
 
     if (rng() > 0.55) {
       setInstanceMatrix(bodiesB, biB++, pos, quat, scl, dummy);
@@ -160,6 +187,7 @@ export function createCityDressing(
 
   return {
     group,
+    cameraOccluders,
     setVisibleCount(buildings: number, rooftops: number) {
       const bCap = Math.min(buildings, maxBuildingsPlaced);
       const ratio = bodySplit / Math.max(1, maxBuildingsPlaced);

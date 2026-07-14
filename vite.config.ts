@@ -25,6 +25,7 @@ export default defineConfig({
       },
     },
     rollupOptions: {
+      input: ['index.html', 'camera-harness.html', 'vfx-harness.html'],
       output: {
         manualChunks(id) {
           if (id.includes('node_modules/@dimforge/rapier')) {
