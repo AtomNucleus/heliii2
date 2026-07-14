@@ -20,6 +20,8 @@
     "test:collision": "node scripts/verify-collision.mjs",
     "test:mission": "node scripts/verify-mission.mjs",
     "test:verify": "npm run test:collision && npm run test:mission",
+    "test:visual": "playwright test e2e/visual-harness.spec.ts --project=chromium",
+    "test:visual:update": "playwright test e2e/visual-harness.spec.ts --project=chromium --update-snapshots",
     "smoke-test": "playwright test"
   },
   "devDependencies": {
