@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import './style.css';
 import { makeAircraft } from './aircraft';
 import { FlightAudio } from './audio';
@@ -409,6 +410,11 @@ function initialize() {
   renderer.toneMappingExposure = 1.15;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   applySettings();
+  const reflectionRoom = new RoomEnvironment();
+  const reflectionGenerator = new THREE.PMREMGenerator(renderer);
+  const reflections = reflectionGenerator.fromScene(reflectionRoom, 0.04).texture;
+  reflectionRoom.dispose();
+  reflectionGenerator.dispose();
   scene.add(new THREE.HemisphereLight(0xc7e4dc, 0x526951, 2.2));
   sun = new THREE.DirectionalLight(0xffdfb0, 3.5);
   sun.position.set(-90, 150, -130);
@@ -423,6 +429,16 @@ function initialize() {
   scene.add(sun, sun.target);
   world = createWorld(scene);
   aircraft = makeAircraft();
+  aircraft.craft.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) {
+      if (material instanceof THREE.MeshStandardMaterial) {
+        material.envMap = reflections;
+        material.envMapIntensity = 0.65;
+      }
+    }
+  });
   scene.add(aircraft.craft);
   setMenuCamera();
   setPhase('home');
@@ -479,7 +495,7 @@ function frame(time: number) {
   craft.position.set(state.position.x, state.position.y, state.position.z);
   craft.rotation.set(state.pitch, state.yaw, state.bank, 'YXZ');
   if (phase === 'home') {
-    craft.rotation.y = -0.35;
+    craft.rotation.y = 0.25;
     craft.position.y += Math.sin(visualTime * 1.1) * (preferences.reducedMotion ? 0 : 0.16);
   }
   craft.visible = cameraMode !== 1 || phase === 'home';
