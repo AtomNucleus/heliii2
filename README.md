@@ -1,166 +1,76 @@
-# HELI SUNSET
+# HELIOS — Flight Lab
 
-Browser-based low-poly helicopter arcade game built with **Three.js**, **TypeScript**, and **Vite**.
+A ground-up helicopter flight experience for the browser, built with TypeScript, Three.js, and Vite. All world geometry, aircraft details, ocean shaders, and audio are generated locally. No downloaded models, WASM physics boot, or asset-loading screens.
 
-Fly a neon strike run over the **Fruzer Polygon** map (Chicken Gun–style battle-royale island).
+## Run
 
-## Project status
+Requires Node.js 22 or later.
 
-TypeScript / Three.js / Vite game sources are in place. This branch includes project foundation (lint/format/test/CI), Playwright smoke coverage, production **PWA / offline** support via `vite-plugin-pwa`, and a **persistent progression / settings / accessibility** slice (local profile, hangar cosmetics, local daily challenge, pause/settings).
-
-## Play
-
-**Live:** https://lucky-buttercream-ca530e.netlify.app
-
-Public deploy (no password). Claim it into your Netlify account soon so it is not suspended — see `NETLIFY_DEPLOY.md`.
-
-## Install
-
-```bash
+```sh
 npm ci
+npm run dev -- --host 0.0.0.0
 ```
 
-(`npm install` also works for local development.)
-
-## Develop
-
-```bash
-npm run dev
-```
-
-Open the URL Vite prints (default `http://localhost:5173`).
-
-**PWA note:** the service worker is **not** registered in `vite` dev mode (`devOptions.enabled: false`). That keeps HMR reliable and avoids stale-cache surprises while iterating. Use a production build + `npm run preview` (or Netlify) to exercise install/offline.
-
-## Build
-
-```bash
-npm run build
-```
-
-Preview the production build:
-
-```bash
-npm run preview
-```
-
-## Progression, settings, and accessibility
-
-Local-only player profile (no accounts, no online leaderboards):
-
-| Key                          | Purpose                                                                                |
-| ---------------------------- | -------------------------------------------------------------------------------------- |
-| `heli-sunset-profile-v1`     | Versioned JSON profile (progression, cosmetics, settings)                              |
-| `heli-sunset-op-sunset-best` | Legacy best-score mirror — imported on first load so existing players keep their score |
-
-**Progression** updates from real mission end summaries: best score / grade / time, completed runs, per-phase accomplishments, and unlock criteria.
-
-**Hangar cosmetics** (start screen → Hangar): four helicopter skins and three loadouts. Locked / unlocked / equipped state is persisted; equipped cosmetics tint the actual heli materials. Loadout “perks” are skill-gated end-run score bonuses only (not combat power).
-
-**Local daily challenge** identity is derived from the UTC calendar date (`DS-####`). A deterministic target/modifier adjusts grading points and an end-run bonus when met. UI copy labels it as local — not a global board. Authored mission scripting is not reseeded (avoids destabilizing phases).
-
-**Settings** (start screen, Esc on start, or Pause → Settings): steering sensitivity, master volume / mute, quality preference (`auto` / low / medium / high), reduced motion (`system` / on / off), high contrast, and radio captions. Changes persist and apply without interrupting an active run unexpectedly.
-
-**Accessibility**
-
-- `reducedMotion: system` follows `prefers-reduced-motion` until the player overrides
-- Reduced motion cuts camera shake, speed-line intensity, film/chromatic punch, and UI animation where practical
-- High contrast strengthens HUD / panel edges and text
-- Captions gate radio chatter text; critical objective toasts stay visible
-- Hangar / settings / pause dialogs are keyboard-focusable with ARIA labels; **Esc** / **P** pause and resume safely during flight
-
-## PWA / offline
-
-Production builds ship:
-
-- Web app manifest (`manifest.webmanifest`) — name **HELI SUNSET**, `standalone`, `landscape`, theme/background `#061018`, relative `scope` / `start_url` (`./`) for Vite `base: './'` and Netlify
-- Icons under `public/icons/` (authored SVG + PNG / maskable sizes)
-- Workbox service worker that precaches the game shell, hashed assets, map/heli GLBs, and Draco decoder (max file size **5 MiB**)
-- Cautious updates: when a new SW is waiting, a HUD-styled banner offers **Reload** / **Apply later** — activation never auto-interrupts an active mission
-- Install affordance only after a real `beforeinstallprompt` (dismissible; hidden on unsupported browsers / already-installed / standalone)
-
-Runtime state is exposed on `#app` for debugging/tests:
-
-- `data-pwa-sw` — `unsupported` | `pending` | `registered` | `waiting` | `controlling`
-- `data-pwa-update` — `none` | `available` | `deferred` | `reloading`
-- `data-pwa-install` — `unsupported` | `available` | `dismissed` | `installed` | `standalone`
-- `data-pwa-offline-ready` — `true` after first successful precache
-
-Pure update/install policy lives in `src/pwa/policy.ts` (unit-tested).
-
-### Platform limits
-
-| Surface                    | Notes                                                                                              |
-| -------------------------- | -------------------------------------------------------------------------------------------------- |
-| Chromium desktop / Android | Full install prompt + offline after first load                                                     |
-| Safari iOS                 | No `beforeinstallprompt`; Add to Home Screen is manual. SW caching works on supported iOS versions |
-| Firefox                    | Install UI varies; SW offline works                                                                |
-| Dev server                 | No SW on purpose                                                                                   |
-| Fonts                      | Google Fonts CSS is network-fetched; offline may fall back to system fonts                         |
-
-## Lint and format
-
-```bash
+```sh
 npm run lint
 npm run format:check
-```
-
-Prettier is configured for configs, scripts, e2e, docs, and the HTML shell. `src/` is ignored for now to avoid large style-only diffs while other workstreams land.
-
-## Test
-
-```bash
-npm test                 # unit + verification scripts
-npm run test:unit        # Node unit tests (AI, render, physics, PWA, profile)
-npm run test:profile     # profile validation / progression / daily / settings
-npm run test:pwa         # PWA update/install policy only
-npm run test:physics     # Rapier debris budget / fragment / lifecycle policies
-npm run test:collision   # collision math verification
-npm run test:mission     # mission authoring verification
-npm run smoke-test       # Playwright Chromium smoke (needs build + browser)
-```
-
-See `PHYSICS_VISUAL.md` for the Rapier debris + visual fidelity slice (what shipped vs deferred).
-
-First-time Playwright setup (local):
-
-```bash
-npx playwright install chromium
-```
-
-CI installs Chromium automatically via GitHub Actions.
-
-## Deploy (Netlify)
-
-```bash
+npm test
 npm run build
-npx netlify deploy --dir dist --prod
+npx playwright install chromium
+npm run smoke-test
 ```
 
-`netlify.toml` publishes `dist` after `npm run build`. See `NETLIFY_DEPLOY.md` for claim/redeploy notes (no credentials stored in-repo).
+`npm run preview` serves the production build. The existing Netlify configuration builds and publishes `dist`. Nothing is automatically deployed or merged.
 
-## Map credit
+## The experience
 
-Playable map:
-[Chicken Gun Fruzer — Polygon](https://sketchfab.com/3d-models/chicken-gun-fruzer-polygon-f6bd85b8748a43fc95ee321f0e4a8677)
-by [amogusstrikesback2](https://sketchfab.com/amogusstrikesback2) on Sketchfab  
-License: **CC Attribution**
-
-Asset path: `public/maps/fruzer-polygon.glb`
+- **Coastal run:** an eight-ring circuit through the Aster archipelago. Swept ring-plane detection prevents missed checkpoints at high speed. Finish with the fastest time you can while protecting your airframe; the best completed time stays on your device.
+- **Free flight:** explore the islands, headlands, fishing boats, lighthouse, and hangar without a course or time limit.
+- **H-01 Kestrel:** a procedural twin-turbine helicopter with cockpit glazing, skids, tail boom, four-blade main rotor, tail rotor, and navigation lights.
+- **Atmosphere:** animated water with shallow-water coloring, Fresnel reflections and sun highlights, vertex-colored coastal terrain, instanced vegetation, shoreline foam, moving birds, and rotor-wash dust/spray.
+- **Sound:** synthesized rotor pulses, turbine harmonics, filtered wind, stereo response, collective/boost load, cockpit filtering, and flight cues. Sound starts only after a user gesture. Pause and backgrounding fade out engine/wind; mute and volume are persistent.
 
 ## Controls
 
-- **WASD / Arrows** — steer & move
-- **Space** — ascend
-- **Shift** — descend
-- **F / click** — fire rockets
-- **E / Q** — boost / evasive
-- **Esc / P** — pause (in flight) or settings (on start)
-- **R** — restart
-- **M** — mute
-- **Mobile / touch** — left thumb steer pad, right thumb ascend/descend buttons, small restart button during flight
-- Fly through neon rings in order (10 total)
+| Input          | Action                        |
+| -------------- | ----------------------------- |
+| W / S or ↑ / ↓ | Forward / brake and reverse   |
+| A / D or ← / → | Turn left / right             |
+| Space / Ctrl   | Climb / descend               |
+| Shift          | Boost                         |
+| C              | Chase / cockpit / wide camera |
+| Esc or P       | Pause / resume                |
+| R              | Restart flight                |
+| M              | Mute / unmute                 |
 
-## Credits
+Touch: left thumb pad steers and moves; right pad controls altitude. Boost and camera buttons sit between them. Pads handle pointer capture, release, and cancellation.
 
-Helicopter model: **Attack Chopper** by Cheese Animal Productions (CC-BY) via [OpenGameArt](https://opengameart.org/content/attack-chopper). See `public/models/ATTRIBUTION.md`.
+Standard-mapped gamepad: left stick flies, right stick Y controls altitude, right trigger boosts, Y changes camera, Start pauses/resumes. Stick deadzones reject controller drift. Physical gamepad behavior requires hardware verification.
+
+## Flight model
+
+The simulation uses a fixed **120 Hz** timestep with a capped render accumulator. Horizontal acceleration, speed-dependent drag, yaw-rate smoothing, bank/pitch response, and a critically damped altitude servo produce an assisted, readable flight model. Let go to level out, brake, and hold altitude. This is an approachable flight game, not an aeronautical simulator.
+
+Terrain uses the same height function for rendered geometry and collision. Static structures have hull-expanded colliders with separation, rebound, impact-speed damage, and a cooldown. Gentle landings preserve the airframe. Flight altitude and world distance are bounded. Losing focus automatically pauses and clears held inputs.
+
+## Device settings and accessibility
+
+Volume/mute, steering sensitivity, high/performance graphics, reduced motion, and the best course time are validated and persisted under `helios-flight-v1`. Storage failures never block flight. System reduced-motion preference initializes the setting. Reduced motion disables camera shake, menu bob/drift, and speed-based zoom. Performance mode disables shadows and limits pixel ratio.
+
+Semantic buttons, visible keyboard focus, native modal focus management, a flight manual, textual instruments, and live-status toasts accompany the 3D view. WebGL2 is required; initialization/context-loss failures present a retry screen rather than an endless loader. Fonts have system fallbacks.
+
+## Scope of the reset
+
+This replaces the old game code, imported assets, combat, map loader, PWA/offline worker, old progression system, and outdated tests/documentation. Existing service-worker registrations for this app scope are retired on first load. The repo history, CI workflow, lint tooling, and Netlify build configuration are retained. PWA installation/offline precaching and combat are not part of this rebuild.
+
+## Source layout
+
+- `src/main.ts`: lifecycle, cameras, HUD, dialogs, and render loop
+- `src/flight.ts`: pure flight dynamics, terrain, course, and checkpoint math
+- `src/world.ts`: procedural coastal world and water/sky shaders
+- `src/aircraft.ts`: Kestrel geometry and rotor animation
+- `src/controls.ts`: keyboard, touch, and gamepad input
+- `src/audio.ts`: Web Audio synthesis and mixer
+- `src/preferences.ts`: validated local settings
+- `src/flight.test.ts`: physics, route, controller, and persistence tests
+- `e2e/`: desktop and touch-enabled Chromium regressions

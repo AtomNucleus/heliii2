@@ -3,514 +3,228 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#061018" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="HELI SUNSET" />
+    <meta name="theme-color" content="#101d22" />
     <meta
       name="description"
-      content="HELI SUNSET — neon arcade helicopter strike run over Fruzer Polygon."
+      content="HELIOS. A beautifully crafted helicopter flight experience. Find your altitude above the Aster coast."
     />
-    <title>HELI SUNSET — Strike Run</title>
-    <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png" />
-    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <title>HELIOS — Find your altitude</title>
   </head>
   <body>
-    <a class="skip-link" href="#start-btn">Skip to start</a>
-
     <div id="app">
-      <canvas id="game-canvas" aria-label="Helicopter game view" tabindex="-1"></canvas>
-
-      <div id="damage-flash" class="damage-flash" aria-hidden="true"></div>
-
-      <div id="crosshair" class="crosshair hidden" data-state="idle" aria-hidden="true">
-        <span class="crosshair-ring"></span>
-        <span class="crosshair-dot"></span>
-        <span class="crosshair-arm crosshair-arm-n"></span>
-        <span class="crosshair-arm crosshair-arm-s"></span>
-        <span class="crosshair-arm crosshair-arm-e"></span>
-        <span class="crosshair-arm crosshair-arm-w"></span>
-      </div>
-
-      <div id="hud" class="hud hidden" role="status" aria-live="polite">
-        <div class="hud-brand" aria-hidden="true">
-          <span class="hud-brand-mark">HS</span>
-          <span class="hud-brand-name">HELI SUNSET</span>
-        </div>
-
-        <div class="hud-cluster-left">
-          <div id="hud-health" class="hud-health is-combat-only is-hidden" data-level="ok">
-            <div class="hud-health-header">
-              <span class="hud-label">HULL</span>
-              <span id="hud-health-text" class="hud-health-text">100</span>
-            </div>
-            <div
-              class="hud-health-track"
-              role="progressbar"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              aria-valuenow="100"
-              aria-label="Hull integrity"
-            >
-              <div id="hud-health-fill" class="hud-health-fill"></div>
-            </div>
-          </div>
-
-          <div class="hud-meter">
-            <div class="hud-row">
-              <span class="hud-label">TIME</span>
-              <span id="hud-time" class="hud-value">0:00.0</span>
-            </div>
-            <div class="hud-row">
-              <span class="hud-label">SPEED</span>
-              <span id="hud-speed" class="hud-value">0</span>
-            </div>
-            <div class="hud-row">
-              <span class="hud-label">ALT</span>
-              <span id="hud-altitude" class="hud-value">0</span>
-            </div>
-            <div class="hud-row">
-              <span class="hud-label">RINGS</span>
-              <span id="hud-rings" class="hud-value">0/10</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="hud-cluster-right">
-          <div class="hud-score-block is-combat-only is-hidden">
-            <span class="hud-label">SCORE</span>
-            <span id="hud-score" class="hud-score">0</span>
-          </div>
-          <div id="hud-combo" class="hud-combo is-combat-only is-hidden" aria-live="polite">
-            <span class="hud-combo-label">COMBO</span>
-            <span id="hud-combo-value" class="hud-combo-value">x1</span>
-          </div>
-          <div id="hud-weapon" class="hud-weapon is-combat-only is-hidden" data-ready="true">
-            <span class="hud-weapon-pip" aria-hidden="true"></span>
-            <span id="hud-weapon-label" class="hud-weapon-label">ROCKETS READY</span>
-          </div>
-          <button
-            id="mute-btn"
-            class="hud-mute"
-            type="button"
-            aria-pressed="false"
-            aria-label="Mute audio"
-            title="Mute (M)"
-          >
-            AUD
+      <canvas id="world" aria-label="Three-dimensional helicopter flight world"></canvas>
+      <div class="vignette"></div>
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="HELIOS home"
+          ><span class="brand-mark">✳</span> HELIOS<span class="brand-tag">FLIGHT LAB</span></a
+        >
+        <nav aria-label="Main navigation">
+          <button id="guide-btn" class="nav-button">Flight manual <span>↗</span></button
+          ><button id="settings-btn" class="icon-button" aria-label="Open settings">⚙</button
+          ><button id="sound-btn" class="sound-button" aria-label="Mute sound">
+            <span class="sound-bars"><i></i><i></i><i></i><i></i></span
+            ><span id="sound-label">SOUND ON</span>
           </button>
-        </div>
-
-        <div id="hud-toast" class="hud-toast" aria-live="polite"></div>
-        <div id="hud-score-popup" class="hud-score-popup" aria-hidden="true"></div>
-
-        <div id="hud-mission" class="hud-mission is-combat-only is-hidden">
-          <span class="hud-mission-tag">OP · STRIKE RUN</span>
-          <span id="hud-mission-title" class="hud-mission-title">DESTROY SUPPLY DEPOTS</span>
-          <span id="hud-mission-detail" class="hud-mission-detail">Primary targets remaining</span>
-          <div class="hud-mission-progress">
-            <div
-              class="hud-mission-track"
-              role="progressbar"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              aria-valuenow="0"
-              aria-label="Mission progress"
-            >
-              <div id="hud-mission-fill" class="hud-mission-fill"></div>
-            </div>
-            <span id="hud-mission-count" class="hud-mission-count">0/0</span>
-          </div>
-        </div>
-      </div>
-
-      <div
-        id="start-overlay"
-        class="overlay"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="start-title"
-      >
-        <div class="overlay-atmosphere" aria-hidden="true"></div>
-        <div class="overlay-panel">
-          <p class="brand-eyebrow">ARCADE FLIGHT</p>
-          <h1 class="title brand-title" id="start-title">
-            <span class="title-heli">HELI</span>
-            <span class="title-sunset">SUNSET</span>
-          </h1>
-          <p class="subtitle">Operation SUNSET · Fruzer Polygon</p>
-          <p id="loading-status" class="loading-status" aria-live="polite">
-            Loading Fruzer Polygon map…
+        </nav>
+      </header>
+      <main id="home">
+        <div class="hero">
+          <div class="eyebrow"><span class="live-dot"></span> A NEW PERSPECTIVE ON FLIGHT</div>
+          <h1>Find your<br /><em>altitude.</em></h1>
+          <p class="hero-copy">
+            Nothing between you and the horizon.<br />Take the controls. Make the coast your
+            playground.
           </p>
-
-          <div class="mission-brief">
-            <div class="mission-brief-header">
-              <span class="mission-brief-code">OP · SUNSET</span>
-              <span class="mission-brief-name">CINEMATIC STRIKE</span>
-            </div>
-            <p class="mission-brief-copy">
-              Eight-phase, three-act strike across Fruzer Polygon (~8–10 min). Act I infiltration,
-              Act II escalation (gauntlet · convoy · drones), Act III bunker climax and exfil. Rings
-              heal and feed combo. Checkpoints recover hull — chase grade S on replay.
-            </p>
+          <button id="launch-btn" class="primary-button" disabled>
+            <span id="launch-label">Preparing the coast…</span><span class="button-arrow">↗</span>
+          </button>
+          <div class="launch-note">
+            <span class="keycap">W</span><span class="keycap">A</span><span class="keycap">S</span
+            ><span class="keycap">D</span><span>to fly <b>·</b> headphones recommended</span>
           </div>
-
-          <ul class="controls">
-            <li>
-              <span class="control-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span>
-              <span class="control-desc">steer &amp; move</span>
-            </li>
-            <li>
-              <span class="control-keys"><kbd>Space</kbd><kbd>Shift</kbd></span>
-              <span class="control-desc">ascend / descend</span>
-            </li>
-            <li>
-              <span class="control-keys"><kbd>F</kbd><span class="control-chip">CLICK</span></span>
-              <span class="control-desc">fire rockets</span>
-            </li>
-            <li>
-              <span class="control-keys"><kbd>E</kbd><kbd>Q</kbd></span>
-              <span class="control-desc">boost / evasive</span>
-            </li>
-            <li>
-              <span class="control-keys"><kbd>Esc</kbd><kbd>P</kbd></span>
-              <span class="control-desc">pause / settings</span>
-            </li>
-            <li>
-              <span class="control-keys"><span class="control-chip">TOUCH</span></span>
-              <span class="control-desc">steer pad · ASC/DESC · FIRE · BOOST</span>
-            </li>
-            <li>
-              <span class="control-keys"><kbd>R</kbd><kbd>M</kbd></span>
-              <span class="control-desc">restart / mute</span>
-            </li>
-          </ul>
-
-          <div class="daily-chip" role="status" aria-live="polite">
-            <span class="daily-chip-label">LOCAL DAILY</span>
-            <span data-daily-id id="start-daily-id">DS-————</span>
-            <p id="daily-challenge-desc" class="daily-chip-desc">
-              Local daily target (UTC) — not an online leaderboard.
-            </p>
-          </div>
-
-          <div class="start-actions">
-            <button id="start-btn" class="neon-btn" disabled>LOADING…</button>
-            <button id="open-hangar-btn" class="ghost-btn" type="button">HANGAR</button>
-            <button id="open-settings-btn" class="ghost-btn" type="button">SETTINGS</button>
-          </div>
-          <p class="hint">or press Enter / tap start · Esc opens settings before flight</p>
-          <p class="credit">
-            Map:
-            <a
-              href="https://sketchfab.com/3d-models/chicken-gun-fruzer-polygon-f6bd85b8748a43fc95ee321f0e4a8677"
-              target="_blank"
-              rel="noopener noreferrer"
-              >Chicken Gun Fruzer — Polygon</a
-            >
-            by
-            <a
-              href="https://sketchfab.com/amogusstrikesback2"
-              target="_blank"
-              rel="noopener noreferrer"
-              >amogusstrikesback2</a
-            >
-            · CC Attribution
-          </p>
         </div>
-      </div>
-
-      <div id="meta-root" class="meta-root" hidden data-mode="closed" aria-hidden="true">
-        <div
-          id="hangar-panel"
-          class="meta-panel"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="hangar-title"
-          hidden
-        >
-          <header class="meta-header">
-            <h2 id="hangar-title">Hangar</h2>
-            <button
-              type="button"
-              id="hangar-close-btn"
-              class="meta-close"
-              aria-label="Close hangar"
-            >
-              Close
+        <div class="aircraft-label">
+          <span class="tiny-label">YOUR AIRCRAFT</span><strong>H-01 Kestrel</strong
+          ><span>Light utility · twin turbine</span>
+          <div class="label-line"></div>
+        </div>
+        <div class="home-bottom">
+          <div class="mission-picker" role="group" aria-label="Choose flight mode">
+            <button class="mission-card selected" data-mode="course" aria-pressed="true">
+              <span class="card-icon">◎</span
+              ><span
+                ><small>01 / THE COASTAL RUN</small
+                ><strong>A little direction. A lot of freedom.</strong
+                ><span>8 checkpoints · precision flight</span></span
+              ><span class="card-check">↗</span>
             </button>
-          </header>
-          <p class="meta-lead">
-            Cosmetics apply to your helicopter. Loadout bonuses are skill-gated score extras — not
-            combat power.
-          </p>
-          <div class="meta-stats" aria-label="Career stats">
-            <div>
-              <span class="meta-stat-label">Best</span> <span id="profile-best-score">0</span>
-            </div>
-            <div>
-              <span class="meta-stat-label">Grade</span> <span id="profile-best-grade">—</span>
-            </div>
-            <div>
-              <span class="meta-stat-label">Wins/Runs</span> <span id="profile-runs">0/0</span>
-            </div>
-            <div>
-              <span class="meta-stat-label">Daily</span>
-              <span data-daily-id>DS-————</span>
-            </div>
-          </div>
-          <h3 class="meta-sub">Skins</h3>
-          <div
-            id="skin-list"
-            class="meta-choice-grid"
-            role="group"
-            aria-label="Helicopter skins"
-          ></div>
-          <h3 class="meta-sub">Loadouts</h3>
-          <div
-            id="loadout-list"
-            class="meta-choice-grid"
-            role="group"
-            aria-label="Loadout packages"
-          ></div>
-          <h3 class="meta-sub">Phase accomplishments</h3>
-          <ul id="phase-progress-list" class="phase-progress-list"></ul>
-        </div>
-
-        <div
-          id="settings-panel"
-          class="meta-panel"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="settings-title"
-          hidden
-        >
-          <header class="meta-header">
-            <h2 id="settings-title">Settings</h2>
-            <button
-              type="button"
-              id="settings-close-btn"
-              class="meta-close"
-              aria-label="Close settings"
-            >
-              Close
+            <button class="mission-card" data-mode="free" aria-pressed="false">
+              <span class="card-icon">∞</span
+              ><span
+                ><small>02 / FREE FLIGHT</small><strong>No clock. No wrong turns.</strong
+                ><span>Explore the Aster archipelago</span></span
+              ><span class="card-check">↗</span>
             </button>
-          </header>
-          <form id="settings-form" class="settings-form" onsubmit="return false;">
-            <label class="settings-row">
-              <span>Steering sensitivity <span id="sensitivity-value">1.00</span></span>
-              <input
-                name="steeringSensitivity"
-                type="range"
-                min="0.5"
-                max="1.5"
-                step="0.05"
-                value="1"
-                aria-valuemin="0.5"
-                aria-valuemax="1.5"
-              />
-            </label>
-            <label class="settings-row">
-              <span>Master volume <span id="volume-value">88%</span></span>
-              <input
-                name="masterVolume"
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value="0.88"
-                aria-valuemin="0"
-                aria-valuemax="1"
-              />
-            </label>
-            <label class="settings-row settings-row-check">
-              <span>Mute audio</span>
-              <input name="muted" type="checkbox" />
-            </label>
-            <label class="settings-row">
-              <span>Quality</span>
-              <select name="quality" aria-label="Quality preference">
-                <option value="auto">Auto</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </label>
-            <label class="settings-row">
-              <span>Reduced motion</span>
-              <select name="reducedMotion" aria-label="Reduced motion preference">
-                <option value="system">System default</option>
-                <option value="on">On</option>
-                <option value="off">Off</option>
-              </select>
-            </label>
-            <label class="settings-row settings-row-check">
-              <span>High contrast HUD</span>
-              <input name="highContrast" type="checkbox" />
-            </label>
-            <label class="settings-row settings-row-check">
-              <span>Radio captions</span>
-              <input name="captions" type="checkbox" checked />
-            </label>
-            <p class="settings-note">
-              Reduced motion follows your OS until you override it. Captions hide radio chatter text
-              only — objective toasts stay visible.
-            </p>
-          </form>
-        </div>
-
-        <div
-          id="pause-panel"
-          class="meta-panel meta-panel-pause"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="pause-title"
-          hidden
-        >
-          <header class="meta-header">
-            <h2 id="pause-title">Paused</h2>
-          </header>
-          <p class="meta-lead">Mission clock held. Esc or Resume to continue.</p>
-          <div class="pause-actions">
-            <button type="button" id="pause-resume-btn" class="neon-btn">RESUME</button>
-            <button type="button" id="pause-settings-btn" class="ghost-btn">SETTINGS</button>
           </div>
-        </div>
-      </div>
-
-      <div
-        id="complete-overlay"
-        class="overlay hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="end-title"
-      >
-        <div class="overlay-atmosphere overlay-atmosphere-win" aria-hidden="true"></div>
-        <div id="end-panel" class="overlay-panel">
-          <h1 class="title" id="end-title">MISSION COMPLETE</h1>
-          <p class="subtitle" id="end-subtitle">Strike successful</p>
-          <p id="final-score" class="final-time">0</p>
-          <div class="complete-stats">
-            <div class="stat">
-              <span class="stat-label">TIME</span>
-              <span id="final-time" class="stat-value">0:00.0</span>
-            </div>
-            <div class="stat">
-              <span class="stat-label">KILLS</span>
-              <span id="final-kills" class="stat-value">0</span>
-            </div>
-            <div class="stat">
-              <span class="stat-label">COMBO</span>
-              <span id="final-combo" class="stat-value">0</span>
-            </div>
-          </div>
-          <button id="restart-btn" class="neon-btn">FLY AGAIN</button>
-          <p class="hint">or press R</p>
-        </div>
-      </div>
-
-      <div
-        id="pwa-update"
-        class="pwa-banner pwa-update"
-        role="status"
-        aria-live="polite"
-        hidden
-        data-visible="false"
-        data-action="none"
-      >
-        <span class="pwa-banner-mark" aria-hidden="true">HS</span>
-        <span data-pwa-update-msg class="pwa-banner-msg">Update ready</span>
-        <button type="button" class="pwa-banner-btn" data-pwa-action="reload">RELOAD</button>
-        <button
-          type="button"
-          class="pwa-banner-dismiss"
-          data-pwa-action="dismiss-update"
-          aria-label="Dismiss update notice"
-        >
-          ×
-        </button>
-      </div>
-
-      <div
-        id="pwa-install"
-        class="pwa-banner pwa-install"
-        role="region"
-        aria-label="Install HELI SUNSET"
-        hidden
-        data-visible="false"
-      >
-        <span class="pwa-banner-msg">Install for offline play</span>
-        <button type="button" class="pwa-banner-btn" data-pwa-action="install">INSTALL</button>
-        <button
-          type="button"
-          class="pwa-banner-dismiss"
-          data-pwa-action="dismiss-install"
-          aria-label="Dismiss install prompt"
-        >
-          ×
-        </button>
-      </div>
-
-      <div id="mobile-controls" class="mobile-controls hidden" aria-hidden="true">
-        <button
-          id="mobile-restart"
-          class="mobile-restart"
-          type="button"
-          aria-label="Restart flight"
-        >
-          RST
-        </button>
-
-        <div class="mobile-dock">
-          <div class="mobile-steer-zone" aria-label="Steer and move">
-            <div
-              id="mobile-stick"
-              class="mobile-stick"
-              role="application"
-              aria-label="Move joystick"
+          <div class="location">
+            <span class="tiny-label">ASTER COAST / 06:42 AM</span
+            ><span
+              ><i class="live-dot"></i> Clear skies <b>18°</b>
+              <span class="location-divider">/</span> Wind 4 kt</span
             >
-              <span class="mobile-stick-label mobile-stick-label-top">FWD</span>
-              <span class="mobile-stick-label mobile-stick-label-bottom">BACK</span>
-              <span class="mobile-stick-label mobile-stick-label-left">LEFT</span>
-              <span class="mobile-stick-label mobile-stick-label-right">RIGHT</span>
-              <div id="mobile-stick-knob" class="mobile-stick-knob"></div>
-            </div>
-          </div>
-
-          <div class="mobile-action-stack" aria-label="Fire, altitude, and boost">
-            <button id="mobile-fire" class="mobile-fire" type="button" aria-label="Fire rockets">
-              FIRE
-            </button>
-            <div class="mobile-altitude-zone" aria-label="Altitude and boost">
-              <button
-                class="mobile-altitude-button"
-                type="button"
-                data-mobile-input="up"
-                aria-label="Ascend"
-              >
-                ASC
-              </button>
-              <button
-                class="mobile-altitude-button mobile-altitude-button-boost"
-                type="button"
-                data-mobile-input="boost"
-                aria-label="Boost"
-              >
-                BST
-              </button>
-              <button
-                class="mobile-altitude-button mobile-altitude-button-descend"
-                type="button"
-                data-mobile-input="down"
-                aria-label="Descend"
-              >
-                DESC
-              </button>
-            </div>
           </div>
         </div>
+        <footer class="home-footer">
+          <span>BUILT FOR THE JOY OF FLYING</span><span>KEYBOARD · TOUCH · GAMEPAD <b>↗</b></span>
+        </footer>
+      </main>
+      <section id="hud" hidden aria-label="Flight instruments">
+        <div class="flight-top">
+          <div class="flight-status">
+            <span class="live-dot"></span><span id="mode-label">COASTAL RUN</span
+            ><span id="flight-clock">00:00</span>
+          </div>
+          <button id="pause-btn" class="icon-button" aria-label="Pause flight">Ⅱ</button>
+        </div>
+        <div class="objective">
+          <small id="objective-label">CHECKPOINT 01 / 08</small
+          ><strong id="objective-title">Into the blue</strong
+          ><span id="objective-distance">Follow the illuminated ring</span>
+          <div id="course-progress" class="course-progress"></div>
+        </div>
+        <div class="compass">
+          <span>W</span><span>NW</span><strong id="heading">000° N</strong><span>NE</span
+          ><span>E</span>
+          <div class="compass-pointer"></div>
+        </div>
+        <div id="target-arrow" class="target-arrow" aria-label="Direction to next checkpoint">
+          ↑<small>NEXT</small>
+        </div>
+        <div class="reticle"><span></span><i></i><span></span></div>
+        <div class="instruments">
+          <div class="instrument">
+            <small>AIRSPEED</small><strong id="speed">000</strong><span>KM/H</span>
+            <div class="instrument-track"><i id="speed-bar"></i></div>
+          </div>
+          <div class="instrument">
+            <small>ALTITUDE</small><strong id="altitude">007</strong><span>M AGL</span>
+            <div class="instrument-track"><i id="altitude-bar"></i></div>
+          </div>
+          <div class="hull">
+            <small>AIRFRAME</small><span id="hull-label">100%</span>
+            <div class="instrument-track"><i id="hull-bar"></i></div>
+            <span id="assist-label" class="assist-label">● HOVER ASSIST</span>
+          </div>
+        </div>
+        <div class="radar-wrap">
+          <canvas id="radar" width="240" height="240" aria-label="Navigation radar"></canvas
+          ><span>ASTER COAST</span>
+        </div>
+        <div class="flight-hints">
+          <span><b>W / S</b> forward / brake</span><span><b>A / D</b> turn</span
+          ><span><b>SPACE / CTRL</b> altitude</span><span><b>SHIFT</b> boost</span
+          ><span><b>C</b> camera</span>
+        </div>
+        <div id="touch-controls">
+          <div class="touch-pad" id="steer-pad" aria-label="Drag to steer and move">
+            <span>STEER</span><i></i>
+          </div>
+          <div class="touch-actions">
+            <button id="touch-boost">BOOST</button
+            ><button id="touch-camera" aria-label="Change camera">CAM</button>
+          </div>
+          <div class="touch-pad" id="lift-pad" aria-label="Drag up to ascend or down to descend">
+            <span>ALTITUDE</span><i></i>
+          </div>
+        </div>
+      </section>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <dialog id="pause-dialog" class="panel">
+        <span class="tiny-label">TAKE A BREATH</span>
+        <h2>Holding altitude.</h2>
+        <p>The coast will be here when you’re ready.</p>
+        <button id="resume-btn" class="primary-button">Back to flight <span>↗</span></button
+        ><button id="restart-btn" class="secondary-button">Restart flight</button
+        ><button id="pause-settings-btn" class="secondary-button">Flight settings</button
+        ><button id="home-btn" class="text-button">Return to hangar</button>
+      </dialog>
+      <dialog id="settings-dialog" class="panel">
+        <button class="dialog-close" aria-label="Close settings">×</button
+        ><span class="tiny-label">MAKE IT YOURS</span>
+        <h2>Flight settings.</h2>
+        <label class="setting"
+          ><span>Master volume<small>Rotor, wind & flight cues</small></span
+          ><input id="volume" type="range" min="0" max="100" value="70" /></label
+        ><label class="setting"
+          ><span>Steering sensitivity<small>A little more or a little less bite</small></span
+          ><input id="sensitivity" type="range" min="50" max="150" value="100" /></label
+        ><label class="setting"
+          ><span>Visual quality<small>High includes real-time shadows</small></span
+          ><select id="quality">
+            <option value="high">High</option>
+            <option value="low">Performance</option>
+          </select></label
+        ><label class="setting"
+          ><span>Reduced motion<small>No camera shake or speed zoom</small></span
+          ><input id="reduced-motion" type="checkbox"
+        /></label>
+        <p class="panel-footnote">Hover assist is always on. Settings stay on this device.</p>
+      </dialog>
+      <dialog id="guide-dialog" class="panel guide-panel">
+        <button class="dialog-close" aria-label="Close flight manual">×</button
+        ><span class="tiny-label">YOUR FIRST FLIGHT</span>
+        <h2>Light on the controls.</h2>
+        <p>
+          Hover assist holds your altitude and gently levels the aircraft when you let go. Small
+          inputs go a long way.
+        </p>
+        <div class="control-row">
+          <span><kbd>W</kbd> <kbd>S</kbd> / ↑ ↓</span><span>Forward / brake & reverse</span>
+        </div>
+        <div class="control-row">
+          <span><kbd>A</kbd> <kbd>D</kbd> / ← →</span><span>Turn left / right</span>
+        </div>
+        <div class="control-row">
+          <span><kbd>Space</kbd> <kbd>Ctrl</kbd></span
+          ><span>Climb / descend</span>
+        </div>
+        <div class="control-row">
+          <span><kbd>Shift</kbd> <kbd>C</kbd></span
+          ><span>Boost / change camera</span>
+        </div>
+        <div class="control-row">
+          <span><kbd>Esc</kbd> <kbd>R</kbd> <kbd>M</kbd></span
+          ><span>Pause / restart / mute</span>
+        </div>
+        <p class="panel-footnote">
+          <b>Touch:</b> left pad steers and moves; right pad controls altitude. <b>Gamepad:</b> left
+          stick flies, right stick climbs/descends, RT boosts, Y changes camera, Start pauses.
+        </p>
+        <p class="panel-footnote">
+          Coastal run: fly through all eight rings. Keep your airframe intact. Free flight: go
+          wherever the horizon takes you.
+        </p>
+      </dialog>
+      <dialog id="result-dialog" class="panel result-panel">
+        <span id="result-eyebrow" class="tiny-label">COASTAL RUN COMPLETE</span>
+        <h2 id="result-title">Beautifully flown.</h2>
+        <p id="result-copy">The coast looks good on you.</p>
+        <div class="result-stats">
+          <div><small>FLIGHT TIME</small><strong id="result-time">00:00</strong></div>
+          <div><small>AIRFRAME</small><strong id="result-hull">100%</strong></div>
+          <div><small>PERSONAL BEST</small><strong id="result-best">—</strong></div>
+        </div>
+        <button id="again-btn" class="primary-button">Fly again <span>↗</span></button
+        ><button id="result-home-btn" class="text-button">Return to hangar</button>
+      </dialog>
+      <div id="error-screen" hidden>
+        <span class="tiny-label">A LITTLE TURBULENCE</span>
+        <h2>We couldn’t start the flight.</h2>
+        <p id="error-copy">
+          This experience needs WebGL2. Try a current browser with hardware acceleration enabled.
+        </p>
+        <button id="retry-btn" class="primary-button">Try again <span>↗</span></button>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
