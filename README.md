@@ -49,7 +49,7 @@ Standard-mapped gamepad: left stick flies, right stick Y controls altitude, righ
 
 ## Flight model
 
-The simulation uses a fixed **120 Hz** timestep with a capped render accumulator. Horizontal acceleration, speed-dependent drag, yaw-rate smoothing, bank/pitch response, and a critically damped altitude servo produce an assisted, readable flight model. Let go to level out, brake, and hold altitude. This is an approachable flight game, not an aeronautical simulator.
+The simulation uses a fixed **120 Hz** timestep with a capped render accumulator. Rotor thrust tilts with cyclic pitch and bank to create forward and lateral motion, while the AFCS holds altitude and flares toward a stop when controls are released. Ground effect boosts lift near the surface, translational lift builds in forward flight, and deterministic coastal wind adds drift and weathercock response. This remains an approachable flight game, not an aeronautical simulator.
 
 Terrain uses the same height function for rendered geometry and collision. Static structures have hull-expanded colliders with separation, rebound, impact-speed damage, and a cooldown. Gentle landings preserve the airframe. Flight altitude and world distance are bounded. Losing focus automatically pauses and clears held inputs.
 
