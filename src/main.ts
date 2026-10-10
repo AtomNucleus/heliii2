@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import './style.css';
 import { makeAircraft } from './aircraft';
 import { FlightAudio } from './audio';
@@ -16,9 +15,10 @@ import {
   STEP,
   stepFlight,
   terrainHeight,
+  coastalWind,
 } from './flight';
 import { loadPreferences, savePreferences } from './preferences';
-import { createWorld } from './world';
+import { createWorld, fogColor, sunDirection } from './world';
 
 const element = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
@@ -45,8 +45,9 @@ let checkpoint = 0,
   cameraShake = 0;
 let world: ReturnType<typeof createWorld>, aircraft: ReturnType<typeof makeAircraft>;
 let renderer: THREE.WebGLRenderer, sun: THREE.DirectionalLight;
+let updateWaterQuality: ((lowQuality: boolean) => void) | undefined;
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x9baea6, 0.0015);
+scene.fog = new THREE.FogExp2(fogColor, 0.0012);
 const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.15, 2600);
 const cameraAim = new THREE.Vector3(),
   desiredCamera = new THREE.Vector3(),
@@ -96,6 +97,7 @@ function applySettings() {
     renderer.shadowMap.enabled = preferences.quality === 'high';
     renderer.setSize(innerWidth, innerHeight);
   }
+  updateWaterQuality?.(preferences.quality === 'low');
   savePreferences(preferences);
 }
 function pause() {
@@ -320,11 +322,12 @@ function updateHud() {
     progress.hidden = true;
   }
   const input = controls.read();
+  const torque = Math.round(state.collective * state.rotorRpm * 68);
   instrument.assist.textContent = input.boost
-    ? '● BOOST ACTIVE'
+    ? `● BOOST ACTIVE · TQ ${torque}%`
     : Math.abs(input.lift) > 0.1
-      ? '● COLLECTIVE'
-      : '● HOVER ASSIST';
+      ? `● COLLECTIVE · TQ ${torque}%`
+      : `● ALT HOLD · TQ ${torque}%`;
   if (radar) {
     const ctx = radar;
     ctx.clearRect(0, 0, 240, 240);
@@ -407,17 +410,11 @@ function initialize() {
       'The graphics could not render on this device. Try a current browser with hardware acceleration enabled.',
     );
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
+  renderer.toneMappingExposure = 0.95;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   applySettings();
-  const reflectionRoom = new RoomEnvironment();
-  const reflectionGenerator = new THREE.PMREMGenerator(renderer);
-  const reflections = reflectionGenerator.fromScene(reflectionRoom, 0.04).texture;
-  reflectionRoom.dispose();
-  reflectionGenerator.dispose();
   scene.add(new THREE.HemisphereLight(0xc7e4dc, 0x526951, 2.2));
   sun = new THREE.DirectionalLight(0xffdfb0, 3.5);
-  sun.position.set(-90, 150, -130);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = sun.shadow.camera.bottom = -90;
@@ -427,7 +424,16 @@ function initialize() {
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target);
-  world = createWorld(scene);
+  world = createWorld(scene, preferences.quality === 'low');
+  updateWaterQuality = world.setQuality;
+  const environmentScene = new THREE.Scene();
+  const environmentSky = world.sky.clone();
+  environmentSky.material = world.sky.material.clone();
+  environmentScene.add(environmentSky);
+  const reflectionGenerator = new THREE.PMREMGenerator(renderer);
+  const reflections = reflectionGenerator.fromScene(environmentScene, 0.04).texture;
+  environmentSky.material.dispose();
+  reflectionGenerator.dispose();
   aircraft = makeAircraft();
   aircraft.craft.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
@@ -460,7 +466,14 @@ function frame(time: number) {
     accumulator += dt;
     while (accumulator >= STEP && phase === 'flying') {
       const previous = { ...state.position };
-      const damage = stepFlight(state, input, STEP, world.obstacles, preferences.sensitivity);
+      const damage = stepFlight(
+        state,
+        input,
+        STEP,
+        world.obstacles,
+        preferences.sensitivity,
+        coastalWind,
+      );
       elapsed += STEP;
       accumulator -= STEP;
       if (damage > 0) {
@@ -483,13 +496,15 @@ function frame(time: number) {
         if (checkpoint === course.length) finish(true);
       }
     }
-    audio.update(
-      speedOf(state),
-      state.position.y - terrainHeight(state.position.x, state.position.z),
-      input,
-      state.yawRate,
-      cameraMode === 1,
-    );
+    audio.update({
+      speed: speedOf(state),
+      altitude: state.position.y - terrainHeight(state.position.x, state.position.z),
+      collective: state.collective,
+      rpm: state.rotorRpm,
+      verticalSpeed: state.velocity.y,
+      yawRate: state.yawRate,
+      cockpit: cameraMode === 1,
+    });
   }
   const craft = aircraft.craft;
   craft.position.set(state.position.x, state.position.y, state.position.z);
@@ -499,7 +514,12 @@ function frame(time: number) {
     craft.position.y += Math.sin(visualTime * 1.1) * (preferences.reducedMotion ? 0 : 0.16);
   }
   craft.visible = cameraMode !== 1 || phase === 'home';
-  aircraft.update(visualTime, phase === 'home' ? 24 : input.boost ? 42 : 34);
+  aircraft.update(dt, {
+    rpm: phase === 'home' ? 1 : state.rotorRpm,
+    collective: phase === 'home' ? 1 : state.collective,
+    pitchRate: phase === 'home' ? 0 : state.pitchRate,
+    bankRate: phase === 'home' ? 0 : state.bankRate,
+  });
   if (phase === 'home') {
     const drift = preferences.reducedMotion ? 0 : Math.sin(visualTime * 0.13) * 0.7;
     camera.position.set(12 + drift, state.position.y + 6, 26);
@@ -539,6 +559,12 @@ function frame(time: number) {
       camera.position.x += Math.sin(time * 0.04) * cameraShake * 0.2;
       camera.position.y += Math.sin(time * 0.063) * cameraShake * 0.12;
     }
+    if (!preferences.reducedMotion && phase === 'flying') {
+      const buffet = Math.min(1, Math.abs(state.pitchRate) + Math.abs(state.bankRate));
+      const vibration = (0.002 + buffet * 0.004) * Math.max(0.25, state.collective);
+      camera.position.x += Math.sin(time * 0.052) * vibration;
+      camera.position.y += Math.sin(time * 0.071) * vibration * 0.65;
+    }
     camera.lookAt(cameraAim);
     camera.fov = damp(
       camera.fov,
@@ -548,7 +574,7 @@ function frame(time: number) {
     );
     camera.updateProjectionMatrix();
   }
-  sun.position.set(craft.position.x - 90, craft.position.y + 150, craft.position.z - 130);
+  sun.position.copy(craft.position).addScaledVector(sunDirection, 240);
   sun.target.position.copy(craft.position);
   world.update(
     visualTime,
@@ -556,6 +582,7 @@ function frame(time: number) {
     craft.position,
     checkpoint,
     phase !== 'home' && mode === 'course',
+    state.collective,
   );
   renderer.render(scene, camera);
   hudTime += dt;
@@ -567,6 +594,7 @@ function frame(time: number) {
   app.dataset.checkpoint = String(checkpoint);
   app.dataset.altitude = state.position.y.toFixed(2);
   app.dataset.speed = speedOf(state).toFixed(2);
+  app.dataset.torque = String(Math.round(state.collective * state.rotorRpm * 68));
   app.dataset.audio = audio.available ? 'ready' : 'locked';
   requestAnimationFrame(frame);
 }

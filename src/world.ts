@@ -1,10 +1,24 @@
 import * as THREE from 'three';
+import { Sky } from 'three/addons/objects/Sky.js';
 import { course, islands, islandHeight, terrainHeight, type Obstacle } from './flight';
 
+export const sunDirection = new THREE.Vector3(
+  -0.4,
+  Math.sin((12 * Math.PI) / 180),
+  -0.8,
+).normalize();
+export const fogColor = new THREE.Color('#a9c1bc');
 const sand = new THREE.Color('#d4c69d'),
+  wetSand = new THREE.Color('#847e68'),
+  drySand = new THREE.Color('#d9c99c'),
   grass = new THREE.Color('#72896a'),
+  lightGrass = new THREE.Color('#899677'),
   rock = new THREE.Color('#738681');
-export function createWorld(scene: THREE.Scene) {
+function colorNoise(x: number, z: number): number {
+  const value = Math.sin(x * 127.1 + z * 311.7) * 43758.5453123;
+  return (value - Math.floor(value)) * 2 - 1;
+}
+export function createWorld(scene: THREE.Scene, lowQuality = false) {
   const obstacles: Obstacle[] = [];
   const animated: { mesh: THREE.Object3D; kind: 'bird' | 'boat'; offset: number }[] = [];
   let seed = 427;
@@ -13,52 +27,94 @@ export function createWorld(scene: THREE.Scene) {
     return seed / 4294967296;
   };
   const water = new THREE.ShaderMaterial({
-    uniforms: { time: { value: 0 }, eye: { value: new THREE.Vector3() } },
-    vertexShader: `uniform float time; varying vec3 worldPosition;
-      void main(){ vec3 p=position; p.z=sin(p.x*.065+time*.7)*.19+sin(p.y*.09-time*.5)*.14;
-      vec4 world=modelMatrix*vec4(p,1.); worldPosition=world.xyz; gl_Position=projectionMatrix*viewMatrix*world; }`,
-    fragmentShader: `uniform float time; uniform vec3 eye; varying vec3 worldPosition;
-      void main(){vec2 p=worldPosition.xz; float shallow=0.;
-      shallow=max(shallow,1.-smoothstep(80.,140.,distance(p,vec2(-40.,25.))));
-      shallow=max(shallow,1.-smoothstep(75.,145.,distance(p,vec2(150.,-170.))));
-      shallow=max(shallow,1.-smoothstep(90.,150.,distance(p,vec2(-150.,-240.))));
-      shallow=max(shallow,1.-smoothstep(110.,170.,distance(p,vec2(25.,-450.))));
-      vec3 col=mix(vec3(.075,.27,.31),vec3(.21,.56,.53),shallow);
-      float a=sin(p.x*.22+p.y*.13+time*.9); float b=cos(p.y*.27-p.x*.08-time*.6);
-      vec3 normal=normalize(vec3(a*.13,1.,b*.11));vec3 v=normalize(eye-worldPosition);
-      float fresnel=pow(1.-max(dot(v,normal),0.),3.);
-      col=mix(col,vec3(.58,.72,.71),fresnel*.48);
-      float spec=pow(max(dot(normal,normalize(v+normalize(vec3(-.4,.34,-.8)))),0.),90.);
-      col+=vec3(1.,.88,.6)*spec*.85;
-      col+=pow(max(0.,sin(p.x*.65+sin(p.y*.3+time)*2.)*cos(p.y*.54-time*.35)),12.)*.018;
-      float fog=1.-exp(-distance(eye,worldPosition)*.0009);col=mix(col,vec3(.57,.69,.68),fog);
-      gl_FragColor=vec4(col,1.);
-      #include <tonemapping_fragment>
-      #include <colorspace_fragment> }`,
+    defines: lowQuality ? { LOW_QUALITY: 1 } : {},
+    uniforms: {
+      time: { value: 0 },
+      eye: { value: new THREE.Vector3() },
+      sunDirection: { value: sunDirection },
+      fogColor: { value: fogColor },
+    },
+    vertexShader: `uniform float time; varying vec3 worldPosition; varying float waveHeight;
+      float wave(vec2 p, vec2 d, float wavelength, float amplitude, float speed) {
+        float k=6.2831853/wavelength;
+        return amplitude*sin(dot(d,p)*k+time*speed);
+      }
+      void main(){
+        vec3 p=position; vec2 xz=p.xy;
+        float a=wave(xz,normalize(vec2(1.,.18)),92.,.12,.62);
+        float b=wave(xz,normalize(vec2(.45,1.)),58.,.09,.83);
+        float c=wave(xz,normalize(vec2(-.7,.55)),37.,.065,1.04);
+        float d=wave(xz,normalize(vec2(.3,-1.)),24.,.04,1.31);
+        waveHeight=a+b+c+d;
+        p.x+=.12*cos(dot(normalize(vec2(1.,.18)),xz)*.0683+time*.62);
+        p.x+=.08*cos(dot(normalize(vec2(.45,1.)),xz)*.1083+time*.83);
+        p.y+=.12*.18*cos(dot(normalize(vec2(1.,.18)),xz)*.0683+time*.62);
+        p.y+=.09*.45*cos(dot(normalize(vec2(.45,1.)),xz)*.1083+time*.83);
+        p.z=waveHeight;
+        vec4 world=modelMatrix*vec4(p,1.); worldPosition=world.xyz;
+        gl_Position=projectionMatrix*viewMatrix*world;
+      }`,
+    fragmentShader: `uniform float time; uniform vec3 eye; uniform vec3 sunDirection; uniform vec3 fogColor;
+      varying vec3 worldPosition; varying float waveHeight;
+      void addWave(vec2 p, vec2 d, float wavelength, float amplitude, float speed, inout vec2 slope) {
+        float k=6.2831853/wavelength;
+        float derivative=amplitude*k*cos(dot(d,p)*k+time*speed);
+        slope+=d*derivative;
+      }
+      void main(){
+        vec2 p=worldPosition.xz; float shallow=0.;
+        shallow=max(shallow,1.-smoothstep(80.,140.,distance(p,vec2(-40.,25.))));
+        shallow=max(shallow,1.-smoothstep(75.,145.,distance(p,vec2(150.,-170.))));
+        shallow=max(shallow,1.-smoothstep(90.,150.,distance(p,vec2(-150.,-240.))));
+        shallow=max(shallow,1.-smoothstep(110.,170.,distance(p,vec2(25.,-450.))));
+        vec2 slope=vec2(0.);
+        addWave(p,normalize(vec2(1.,.18)),92.,.12,.62,slope);
+        addWave(p,normalize(vec2(.45,1.)),58.,.09,.83,slope);
+        #ifndef LOW_QUALITY
+        addWave(p,normalize(vec2(-.7,.55)),37.,.065,1.04,slope);
+        addWave(p,normalize(vec2(.3,-1.)),24.,.04,1.31,slope);
+        #endif
+        vec3 normal=normalize(vec3(-slope.x,1.,-slope.y));
+        vec3 v=normalize(eye-worldPosition);
+        float ndv=max(dot(v,normal),0.);
+        float fresnel=.02+.98*pow(1.-ndv,5.);
+        vec3 deep=vec3(.035,.14,.19), coast=vec3(.13,.34,.33);
+        vec3 col=mix(deep,coast,shallow);
+        float skyAmount=clamp(reflect(-v,normal).y*.5+.5,0.,1.);
+        vec3 skyReflection=mix(vec3(.43,.56,.55),vec3(.24,.43,.48),smoothstep(0.,.75,skyAmount));
+        col=mix(col,skyReflection,clamp(fresnel*.82,0.,.82));
+        float spec=pow(max(dot(normal,normalize(v+sunDirection)),0.),96.);
+        col+=vec3(1.,.82,.58)*spec*1.1;
+        float crest=smoothstep(.12,.28,waveHeight);
+        col=mix(col,vec3(.42,.58,.53),crest*.16);
+        float foam=smoothstep(.16,.48,shallow)*(1.-smoothstep(.63,.91,shallow));
+        col=mix(col,vec3(.7,.78,.72),foam*.24);
+        float fog=1.-exp(-distance(eye,worldPosition)*.00085);
+        col=mix(col,fogColor,fog);
+        gl_FragColor=vec4(col,1.);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment> }`,
   });
   const ocean = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000, 120, 120), water);
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.y = -0.12;
   scene.add(ocean);
-  const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(2300, 32, 24),
-    new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      depthWrite: false,
-      vertexShader: `varying vec3 direction;void main(){direction=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
-      fragmentShader: `varying vec3 direction;void main(){vec3 d=normalize(direction);float h=clamp(d.y,0.,1.);vec3 c=mix(vec3(.69,.77,.71),vec3(.15,.37,.44),pow(h,.6));float glow=pow(max(dot(d,normalize(vec3(-.4,.34,-.8))),0.),12.);c+=vec3(.32,.2,.075)*glow;float sun=pow(max(dot(d,normalize(vec3(-.4,.34,-.8))),0.),1900.);c+=vec3(1.,.9,.55)*sun*1.5;gl_FragColor=vec4(c,1.);
-    #include <tonemapping_fragment>
-    #include <colorspace_fragment> }`,
-    }),
-  );
+  const sky = new Sky();
+  sky.scale.setScalar(450000);
+  Object.assign(sky.material.uniforms, {
+    turbidity: { value: 6 },
+    rayleigh: { value: 1.15 },
+    mieCoefficient: { value: 0.003 },
+    mieDirectionalG: { value: 0.78 },
+  });
+  sky.material.uniforms.sunPosition.value.copy(sunDirection);
   scene.add(sky);
 
   for (const island of islands) {
     const positions: number[] = [],
-      colors: number[] = [],
       indices: number[] = [];
-    const radial = 38,
-      segments = 96;
+    const radial = 56,
+      segments = 144;
     for (let r = 0; r <= radial; r++)
       for (let s = 0; s <= segments; s++) {
         const angle = (s / segments) * Math.PI * 2;
@@ -67,9 +123,6 @@ export function createWorld(scene: THREE.Scene) {
         const z = island.z + ((Math.sin(angle) * island.rz * r) / radial) * edge;
         const y = islandHeight(x, z, island);
         positions.push(x, y, z);
-        const c = y < 2 ? sand.clone() : grass.clone().lerp(rock, Math.max(0, (y - 8) / 28));
-        c.multiplyScalar(0.93 + random() * 0.12);
-        colors.push(c.r, c.g, c.b);
         if (r < radial && s < segments) {
           const a = r * (segments + 1) + s,
             b = a + segments + 1;
@@ -78,9 +131,29 @@ export function createWorld(scene: THREE.Scene) {
       }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
+    const normals = geometry.getAttribute('normal'),
+      colors: number[] = [];
+    for (let i = 0; i < positions.length / 3; i++) {
+      const y = positions[i * 3 + 1],
+        slope = normals.getY(i);
+      const c =
+        y < 1.8
+          ? wetSand.clone().lerp(sand, THREE.MathUtils.smoothstep(y, 0, 1.8))
+          : drySand.clone().lerp(grass, THREE.MathUtils.smoothstep(y, 2, 5));
+      const vegetation = colorNoise(positions[i * 3] * 0.025, positions[i * 3 + 2] * 0.025);
+      c.lerp(
+        grass.clone().lerp(lightGrass, vegetation * 0.5 + 0.5),
+        THREE.MathUtils.smoothstep(y, 3, 8),
+      );
+      c.lerp(rock, 1 - THREE.MathUtils.smoothstep(slope, 0.7, 0.848));
+      c.multiplyScalar(
+        0.94 + colorNoise(positions[i * 3] * 0.11, positions[i * 3 + 2] * 0.11) * 0.06,
+      );
+      colors.push(c.r, c.g, c.b);
+    }
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     const mesh = new THREE.Mesh(
       geometry,
       new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }),
@@ -128,12 +201,17 @@ export function createWorld(scene: THREE.Scene) {
       continue;
     const size = 3 + random() * 3;
     dummy.position.set(x, height + size * 0.4, z);
-    dummy.scale.set(1, size * 0.8, 1);
+    const width = 0.84 + random() * 0.3;
+    dummy.scale.set(width, size * 0.8, width);
     dummy.rotation.set(0, random() * 6, 0);
     dummy.updateMatrix();
     trunk.setMatrixAt(count, dummy.matrix);
+    trunk.setColorAt(
+      count,
+      new THREE.Color().setRGB(0.82 + random() * 0.3, 0.82 + random() * 0.3, 0.82 + random() * 0.3),
+    );
     dummy.position.y = height + size;
-    dummy.scale.set(size * 0.52, size * 0.65, size * 0.52);
+    dummy.scale.set(size * (0.48 + random() * 0.08), size * (0.58 + random() * 0.14), size * 0.52);
     dummy.updateMatrix();
     leaves.setMatrixAt(count, dummy.matrix);
     leaves.setColorAt(
@@ -329,15 +407,51 @@ export function createWorld(scene: THREE.Scene) {
     45,
   );
   scene.add(dust);
+  const spray = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(0.26, 0.26),
+    new THREE.MeshBasicMaterial({
+      color: 0xf0f4e9,
+      transparent: true,
+      opacity: 0.44,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+    48,
+  );
+  scene.add(spray);
+  const ripples = [0, 1].map((i) => {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.72, 0.9, 64),
+      new THREE.MeshBasicMaterial({
+        color: 0xd5e8df,
+        transparent: true,
+        opacity: 0.2,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.02 + i * 0.01;
+    scene.add(ring);
+    return ring;
+  });
+  const washColor = new THREE.Color();
+  const sprayQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
   return {
     obstacles,
     rings,
+    sky,
+    setQuality(low: boolean) {
+      water.defines = low ? { LOW_QUALITY: 1 } : {};
+      water.needsUpdate = true;
+    },
     update(
       time: number,
       camera: THREE.Camera,
       craftPosition: THREE.Vector3,
       activeRing: number,
       showRings: boolean,
+      collective: number,
     ) {
       water.uniforms.time.value = time;
       water.uniforms.eye.value.copy(camera.position);
@@ -366,24 +480,45 @@ export function createWorld(scene: THREE.Scene) {
         }
       }
       const ground = terrainHeight(craftPosition.x, craftPosition.z),
-        intensity = Math.max(0, 1 - (craftPosition.y - ground) / 16);
-      dust.visible = intensity > 0.01;
-      if (dust.visible)
-        for (let i = 0; i < 45; i++) {
-          const life = (time * 0.6 + i / 45) % 1,
-            angle = i * 2.399 + time * 0.2;
-          const radius = 1.4 + life * 10;
+        rotorHeight = craftPosition.y + 1.84 - ground,
+        intensity = Math.max(0, Math.min(1, 1 - rotorHeight / 17)) * collective,
+        overWater = ground <= 0;
+      dust.visible = intensity > 0.01 && !overWater;
+      spray.visible = intensity > 0.01 && overWater;
+      if (dust.visible || spray.visible) {
+        const particles = overWater ? spray : dust,
+          count = overWater ? 48 : 45;
+        washColor.set(overWater ? '#edf4ec' : ground < 2.5 ? '#d8c4a0' : '#78876a');
+        for (let i = 0; i < count; i++) {
+          const life = (time * 0.6 + i / count) % 1,
+            angle = i * 2.399 + time * 0.2,
+            radius = 1.4 + life * (overWater ? 12 : 10);
           dummy.position.set(
             craftPosition.x + Math.cos(angle) * radius,
-            ground + 0.2 + life * 1.7,
+            (overWater ? 0.04 : ground + 0.2) + life * (overWater ? 0.8 : 1.7),
             craftPosition.z + Math.sin(angle) * radius,
           );
-          dummy.scale.setScalar((1 - life) * intensity * (ground < 0.1 ? 2 : 1));
-          dummy.quaternion.copy(camera.quaternion);
+          dummy.scale.setScalar((1 - life) * intensity * (overWater ? 1.8 : 1));
+          if (overWater) dummy.quaternion.copy(sprayQuaternion);
+          else dummy.quaternion.copy(camera.quaternion);
           dummy.updateMatrix();
-          dust.setMatrixAt(i, dummy.matrix);
+          particles.setMatrixAt(i, dummy.matrix);
+          if (!overWater) dust.setColorAt(i, washColor);
         }
+        particles.instanceMatrix.needsUpdate = true;
+        if (!overWater && dust.instanceColor) dust.instanceColor.needsUpdate = true;
+      }
+      for (let i = 0; i < ripples.length; i++) {
+        const ring = ripples[i],
+          phase = (time * 0.24 + i * 0.5) % 1;
+        ring.visible = spray.visible;
+        ring.position.x = craftPosition.x;
+        ring.position.z = craftPosition.z;
+        ring.scale.setScalar(1 + phase * 6);
+        (ring.material as THREE.MeshBasicMaterial).opacity = (1 - phase) * intensity * 0.2;
+      }
       dust.instanceMatrix.needsUpdate = true;
+      if (spray.visible) spray.instanceMatrix.needsUpdate = true;
     },
   };
 }
