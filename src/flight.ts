@@ -17,6 +17,7 @@ export interface FlightState {
   position: Vec3;
   velocity: Vec3;
   yaw: number;
+  headingTarget: number;
   yawRate: number;
   pitch: number;
   bank: number;
@@ -150,6 +151,7 @@ export function createFlight(): FlightState {
     position: { x: 0, y, z: 45 },
     velocity: { x: 0, y: 0, z: 0 },
     yaw: 0,
+    headingTarget: 0,
     yawRate: 0,
     pitch: 0,
     bank: 0,
@@ -219,15 +221,22 @@ export function stepFlight(
     (16 * (targetBank - state.bank) - 8 * state.bankRate - gustVariation * 0.06) * dt;
   state.pitch += state.pitchRate * dt;
   state.bank += state.bankRate * dt;
-  const turnRate = -turn * sensitivity * (1.3 - Math.min(speed / 140, 0.35));
+  const turnRate = -turn * sensitivity * (1.3 - Math.min(speed / 140, 0.35)) * 0.75;
+  if (Math.abs(turn) > 0.01) state.headingTarget = state.yaw;
+  const headingHoldError = Math.atan2(
+    Math.sin(state.headingTarget - state.yaw),
+    Math.cos(state.headingTarget - state.yaw),
+  );
+  const headingHold = Math.abs(turn) < 0.01 ? headingHoldError * 4 : 0;
   const desiredHeading = Math.atan2(-airVelocity.x, -airVelocity.z);
   const headingError = Math.atan2(
     Math.sin(desiredHeading - state.yaw),
     Math.cos(desiredHeading - state.yaw),
   );
-  const weathervane = headingError * Math.min(airspeed / 25, 1) * (airspeed > 0.01 ? 0.8 : 0);
-  state.yawRate = damp(state.yawRate, turnRate + weathervane, 4, dt);
+  const weathervane = headingError * 0.35 * smoothstep(12, 30, airspeed);
+  state.yawRate = damp(state.yawRate, turnRate + weathervane + headingHold, 4, dt);
   state.yaw += state.yawRate * dt;
+  if (Math.abs(turn) > 0.01) state.headingTarget = state.yaw;
   const terrain = terrainHeight(state.position.x, state.position.z);
   const ground = terrain + SKID_HEIGHT;
   state.targetAltitude = clamp(
@@ -369,7 +378,7 @@ export function stepFlight(
 }
 
 export const course = [
-  { x: -28, y: 14, z: -55, name: 'Into the blue' },
+  { x: 0, y: 17, z: -55, name: 'Into the blue' },
   { x: 100, y: 25, z: -135, name: 'The eastern shore' },
   { x: 140, y: 28, z: -285, name: 'Lighthouse approach' },
   { x: 40, y: 45, z: -390, name: 'Above the headland' },

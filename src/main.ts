@@ -410,7 +410,7 @@ function initialize() {
       'The graphics could not render on this device. Try a current browser with hardware acceleration enabled.',
     );
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.95;
+  renderer.toneMappingExposure = 0.55;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   applySettings();
   scene.add(new THREE.HemisphereLight(0xc7e4dc, 0x526951, 2.2));
@@ -427,12 +427,41 @@ function initialize() {
   world = createWorld(scene, preferences.quality === 'low');
   updateWaterQuality = world.setQuality;
   const environmentScene = new THREE.Scene();
+  environmentScene.background = new THREE.Color('#89aeb2');
   const environmentSky = world.sky.clone();
   environmentSky.material = world.sky.material.clone();
+  environmentSky.scale.setScalar(90);
+  environmentSky.material.uniforms.showSunDisc.value = 0;
   environmentScene.add(environmentSky);
+  const seaGeometry = new THREE.SphereGeometry(
+    80,
+    48,
+    32,
+    0,
+    Math.PI * 2,
+    Math.PI / 2,
+    Math.PI / 2,
+  );
+  const seaColors = new Float32Array(seaGeometry.attributes.position.count * 3);
+  const horizonColor = new THREE.Color('#afc5c3');
+  const deepWaterColor = new THREE.Color('#356376');
+  const vertexColor = new THREE.Color();
+  for (let i = 0; i < seaGeometry.attributes.position.count; i++) {
+    const depth = THREE.MathUtils.smoothstep(-seaGeometry.attributes.position.getY(i), 0, 80);
+    vertexColor.copy(horizonColor).lerp(deepWaterColor, depth);
+    vertexColor.toArray(seaColors, i * 3);
+  }
+  seaGeometry.setAttribute('color', new THREE.BufferAttribute(seaColors, 3));
+  const seaHemisphere = new THREE.Mesh(
+    seaGeometry,
+    new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide }),
+  );
+  environmentScene.add(seaHemisphere);
   const reflectionGenerator = new THREE.PMREMGenerator(renderer);
-  const reflections = reflectionGenerator.fromScene(environmentScene, 0.04).texture;
+  const reflections = reflectionGenerator.fromScene(environmentScene, 0.04, 0.1, 100).texture;
   environmentSky.material.dispose();
+  seaGeometry.dispose();
+  seaHemisphere.material.dispose();
   reflectionGenerator.dispose();
   aircraft = makeAircraft();
   aircraft.craft.traverse((object) => {

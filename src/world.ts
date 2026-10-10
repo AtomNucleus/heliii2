@@ -7,7 +7,7 @@ export const sunDirection = new THREE.Vector3(
   Math.sin((12 * Math.PI) / 180),
   -0.8,
 ).normalize();
-export const fogColor = new THREE.Color('#a9c1bc');
+export const fogColor = new THREE.Color('#f0d0bc');
 const sand = new THREE.Color('#d4c69d'),
   wetSand = new THREE.Color('#847e68'),
   drySand = new THREE.Color('#d9c99c'),
@@ -83,8 +83,12 @@ export function createWorld(scene: THREE.Scene, lowQuality = false) {
         float skyAmount=clamp(reflect(-v,normal).y*.5+.5,0.,1.);
         vec3 skyReflection=mix(vec3(.43,.56,.55),vec3(.24,.43,.48),smoothstep(0.,.75,skyAmount));
         col=mix(col,skyReflection,clamp(fresnel*.82,0.,.82));
-        float spec=pow(max(dot(normal,normalize(v+sunDirection)),0.),96.);
-        col+=vec3(1.,.82,.58)*spec*1.1;
+        float halfSpec=max(dot(normal,normalize(v+sunDirection)),0.);
+        float sharpGlint=pow(halfSpec,400.);
+        float broadGlint=pow(halfSpec,96.);
+        float glint=clamp(sharpGlint*.14+broadGlint*.008,0.,.18);
+        col+=vec3(1.,.82,.58)*glint;
+        col=min(col,vec3(.72));
         float crest=smoothstep(.12,.28,waveHeight);
         col=mix(col,vec3(.42,.58,.53),crest*.16);
         float foam=smoothstep(.16,.48,shallow)*(1.-smoothstep(.63,.91,shallow));
@@ -100,12 +104,20 @@ export function createWorld(scene: THREE.Scene, lowQuality = false) {
   ocean.position.y = -0.12;
   scene.add(ocean);
   const sky = new Sky();
+  sky.material.fragmentShader = sky.material.fragmentShader.replace(
+    'gl_FragColor = vec4( texColor, 1.0 );',
+    'texColor *= mix(0.18, 0.9, smoothstep(0.0, 0.65, direction.y));\n\t\t\tgl_FragColor = vec4( texColor, 1.0 );',
+  );
+  sky.material.needsUpdate = true;
   sky.scale.setScalar(450000);
   Object.assign(sky.material.uniforms, {
-    turbidity: { value: 6 },
-    rayleigh: { value: 1.15 },
-    mieCoefficient: { value: 0.003 },
-    mieDirectionalG: { value: 0.78 },
+    turbidity: { value: 3 },
+    rayleigh: { value: 2 },
+    mieCoefficient: { value: 0.004 },
+    mieDirectionalG: { value: 0.8 },
+    cloudCoverage: { value: 0 },
+    cloudDensity: { value: 0 },
+    showSunDisc: { value: 0 },
   });
   sky.material.uniforms.sunPosition.value.copy(sunDirection);
   scene.add(sky);
@@ -183,7 +195,7 @@ export function createWorld(scene: THREE.Scene, lowQuality = false) {
   );
   const leaves = new THREE.InstancedMesh(
     new THREE.IcosahedronGeometry(1, 1),
-    new THREE.MeshStandardMaterial({ color: 0x426c57, roughness: 1 }),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 }),
     420,
   );
   const dummy = new THREE.Object3D();
@@ -216,7 +228,11 @@ export function createWorld(scene: THREE.Scene, lowQuality = false) {
     leaves.setMatrixAt(count, dummy.matrix);
     leaves.setColorAt(
       count,
-      new THREE.Color().setHSL(0.34 + random() * 0.06, 0.23, 0.23 + random() * 0.14),
+      new THREE.Color().setHSL(
+        0.29 + random() * 0.08,
+        0.4 + random() * 0.16,
+        0.38 + random() * 0.13,
+      ),
     );
     count++;
   }

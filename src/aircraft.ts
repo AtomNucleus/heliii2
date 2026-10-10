@@ -11,14 +11,18 @@ export function makeAircraft() {
   const craft = new THREE.Group();
   const shell = new THREE.MeshStandardMaterial({
     color: 0xd7dfd2,
-    roughness: 0.32,
-    metalness: 0.62,
+    roughness: 0.38,
+    metalness: 0.18,
   });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x24343a, roughness: 0.37, metalness: 0.8 });
+  const dark = new THREE.MeshStandardMaterial({
+    color: 0x4b6265,
+    roughness: 0.48,
+    metalness: 0.25,
+  });
   const glass = new THREE.MeshPhysicalMaterial({
-    color: 0x244c60,
-    roughness: 0.1,
-    metalness: 0.55,
+    color: 0x315d70,
+    roughness: 0.12,
+    metalness: 0.05,
     clearcoat: 1,
   });
   const lime = new THREE.MeshStandardMaterial({ color: 0xd6f58c, roughness: 0.4, metalness: 0.3 });

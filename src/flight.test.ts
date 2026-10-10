@@ -163,6 +163,11 @@ test('coastal wind is deterministic and induces a stable leaning hover', () => {
     Math.hypot(state.position.x - start.position.x, state.position.z - start.position.z) < 15,
   );
   assert.ok(Math.abs(state.pitch) + Math.abs(state.bank) > 0.01);
+  assert.ok(Math.abs(state.yaw) < 0.02);
+});
+test('coastal wind causes only modest heading drift in forward flight', () => {
+  const state = simulate(20, { ...neutralInput, forward: 1 }, coastalWind);
+  assert.ok(Math.abs(state.yaw) < 0.08);
 });
 test('coastal forward flight reaches the first course ring', () => {
   const state = createFlight();
